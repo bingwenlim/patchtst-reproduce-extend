@@ -1,0 +1,12 @@
+[project]
+name = "patchtst-reproduce-extend"
+version = "0.1.0"
+description = "Replication and extension of PatchTST for time series forecasting. DSA5106 Group 23."
+requires-python = ">=3.12"
+dependencies = [
+    "torch>=2.2",
+    "numpy",
+    "pandas",
+    "scikit-learn",
+    "matplotlib",
+]
