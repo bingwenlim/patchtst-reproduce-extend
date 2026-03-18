@@ -16,7 +16,7 @@ Then restart your terminal (or run `source ~/.zshrc` / `source ~/.bashrc`) so th
 ### 2. Clone the repo
 
 ```bash
-git clone git@github.com:BingWen-Fazz/patchtst-reproduce-extend.git
+git clone git@github.com:bingwenlim/patchtst-reproduce-extend.git
 cd patchtst-reproduce-extend
 ```
 
