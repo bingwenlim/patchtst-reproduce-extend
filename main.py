@@ -1,5 +1,8 @@
+from train import run_patchtst_sanity_check
+
+
 def main():
-    print("Hello from patchtst-reproduce-extend!")
+    run_patchtst_sanity_check()
 
 
 if __name__ == "__main__":
