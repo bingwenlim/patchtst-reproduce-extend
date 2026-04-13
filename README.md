@@ -28,19 +28,64 @@ uv sync
 
 This will automatically download Python 3.12 if you don't have it, create a virtual environment in `.venv/`, and install all required packages.
 
-### 4. Run code
+### 4. Dataset
 
-Prefix any Python command with `uv run` to use the project environment:
+Place datasets inside the data/ folder.
+
+Example:
 
 ```bash
-uv run python main.py
+data/
+  ett.csv
+  weather.csv
+  electricity.csv
 ```
 
+### 5. Run Training 
+Prefix any Python command with `uv run` to use the project environment.
+
 You do not need to manually activate the virtual environment.
+
+
+#### Train models
+
+```bash
+# PatchTST
+uv run python train.py --model PatchTST --data data/ett.csv
+
+# DLinear
+uv run python train.py --model DLinear --data data/ett.csv
+
+# Autoformer
+uv run python train.py --model Autoformer --data data/ett.csv
+```
+
+
+#### Optional arguments
+```bash
+uv run python train.py \
+  --model PatchTST \
+  --data data/ett.csv \
+  --epochs 20 \
+  --batch_size 32 \
+  --lr 0.0001 \
+  --seq_len 336 \
+  --pred_len 96
+```
+#### Output
+Model checkpoints will be saved in:
+
+```bash
+checkpoints/
+```
 
 ## Project Structure
 
 ```
 models/         # Model implementations (DLinear, Autoformer, PatchTST)
 layers/         # Shared building blocks used by models
+data_provider.py # Dataset loading and preprocessing
+train.py        # Main training script
+data/           # Dataset files (not included in repo)
+checkpoints/    # Saved model weights
 ```
