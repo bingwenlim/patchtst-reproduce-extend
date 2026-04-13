@@ -1,44 +1,61 @@
-import pandas as pd
 import numpy as np
+import pandas as pd
 import torch
 from torch.utils.data import Dataset
 
 
 class TimeSeriesDataset(Dataset):
-    def __init__(self, data, seq_len, pred_len):
+    def __init__(self, data: np.ndarray, seq_len: int, pred_len: int):
         """
         data: numpy array of shape [T, C]
+        seq_len: input sequence length
+        pred_len: prediction horizon
         """
-        self.data = data
+        if len(data) < seq_len + pred_len:
+            raise ValueError(
+                f"Data length ({len(data)}) is too short for "
+                f"seq_len={seq_len} and pred_len={pred_len}."
+            )
+
+        self.data = np.asarray(data, dtype=np.float32)
         self.seq_len = seq_len
         self.pred_len = pred_len
 
-    def __len__(self):
+    def __len__(self) -> int:
         return len(self.data) - self.seq_len - self.pred_len + 1
 
-    def __getitem__(self, idx):
-        x = self.data[idx: idx + self.seq_len]
-        y = self.data[idx + self.seq_len: idx + self.seq_len + self.pred_len]
+    def __getitem__(self, idx: int):
+        x = self.data[idx : idx + self.seq_len]
+        y = self.data[idx + self.seq_len : idx + self.seq_len + self.pred_len]
 
-        x = torch.tensor(x, dtype=torch.float32)
-        y = torch.tensor(y, dtype=torch.float32)
-
-        return x, y
+        return torch.from_numpy(x), torch.from_numpy(y)
 
 
-def load_csv_dataset(file_path, target_cols=None):
+def load_csv_dataset(file_path: str, target_cols=None) -> np.ndarray:
     df = pd.read_csv(file_path)
 
-    # keep only numeric columns if target_cols not provided
     if target_cols is None:
         df = df.select_dtypes(include=[np.number])
     else:
+        missing_cols = [col for col in target_cols if col not in df.columns]
+        if missing_cols:
+            raise ValueError(f"Missing columns in dataset: {missing_cols}")
         df = df[target_cols]
 
-    return df.values
+    if df.empty:
+        raise ValueError(
+            "No usable columns found in the dataset. "
+            "Check whether the CSV contains numeric columns or valid target_cols."
+        )
+
+    return df.to_numpy(dtype=np.float32)
 
 
 def standardize_train_val_test(train_data, val_data, test_data):
+    train_data = np.asarray(train_data, dtype=np.float32)
+    val_data = np.asarray(val_data, dtype=np.float32)
+    test_data = np.asarray(test_data, dtype=np.float32)
+
     mean = train_data.mean(axis=0, keepdims=True)
     std = train_data.std(axis=0, keepdims=True)
     std[std == 0] = 1.0
