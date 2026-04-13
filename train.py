@@ -1,9 +1,11 @@
 import argparse
 import copy
+import random
 import time
 from pathlib import Path
 from types import SimpleNamespace
 
+import numpy as np
 import torch
 import torch.nn as nn
 import torch.optim as optim
@@ -13,6 +15,14 @@ from models.DLinear import Model as DLinear
 from models.Autoformer import Model as Autoformer
 from models.PatchTST import Model as PatchTST
 from data_provider import TimeSeriesDataset, load_csv_dataset, standardize_train_val_test
+
+
+def set_seed(seed: int = 42) -> None:
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed_all(seed)
 
 
 def get_default_configs(
@@ -54,7 +64,7 @@ def get_default_configs(
     )
 
 
-def get_model(model_name, configs):
+def get_model(model_name: str, configs):
     if model_name == "DLinear":
         return DLinear(configs)
     if model_name == "Autoformer":
@@ -64,6 +74,16 @@ def get_model(model_name, configs):
     raise ValueError(f"Unknown model_name: {model_name}")
 
 
+def build_decoder_input(batch_size: int, configs, dtype, device):
+    return torch.zeros(
+        batch_size,
+        configs.label_len + configs.pred_len,
+        configs.dec_in,
+        dtype=dtype,
+        device=device,
+    )
+
+
 def evaluate(model, loader, criterion, configs, device):
     model.eval()
     total_mse = 0.0
@@ -71,14 +91,12 @@ def evaluate(model, loader, criterion, configs, device):
 
     with torch.no_grad():
         for x_enc, y_true in loader:
-            x_enc = x_enc.to(device)
-            y_true = y_true.to(device)
+            x_enc = x_enc.to(device, non_blocking=True)
+            y_true = y_true.to(device, non_blocking=True)
 
-            batch_size = x_enc.size(0)
-            x_dec = torch.zeros(
-                batch_size,
-                configs.label_len + configs.pred_len,
-                configs.dec_in,
+            x_dec = build_decoder_input(
+                batch_size=x_enc.size(0),
+                configs=configs,
                 dtype=x_enc.dtype,
                 device=device,
             )
@@ -91,39 +109,35 @@ def evaluate(model, loader, criterion, configs, device):
             total_mse += mse.item()
             total_mae += mae.item()
 
-    avg_mse = total_mse / len(loader)
-    avg_mae = total_mae / len(loader)
-    return avg_mse, avg_mae
+    return total_mse / len(loader), total_mae / len(loader)
 
 
 def train_one_epoch(model, loader, optimizer, criterion, configs, device):
     model.train()
-    total_loss = 0.0
+    total_mse = 0.0
 
     for x_enc, y_true in loader:
-        x_enc = x_enc.to(device)
-        y_true = y_true.to(device)
+        x_enc = x_enc.to(device, non_blocking=True)
+        y_true = y_true.to(device, non_blocking=True)
 
         optimizer.zero_grad()
 
-        batch_size = x_enc.size(0)
-        x_dec = torch.zeros(
-            batch_size,
-            configs.label_len + configs.pred_len,
-            configs.dec_in,
+        x_dec = build_decoder_input(
+            batch_size=x_enc.size(0),
+            configs=configs,
             dtype=x_enc.dtype,
             device=device,
         )
 
         y_pred = model(x_enc, None, x_dec, None)
-        loss = criterion(y_pred, y_true)
+        mse = criterion(y_pred, y_true)
 
-        loss.backward()
+        mse.backward()
         optimizer.step()
 
-        total_loss += loss.item()
+        total_mse += mse.item()
 
-    return total_loss / len(loader)
+    return total_mse / len(loader)
 
 
 def run_training(
@@ -137,7 +151,11 @@ def run_training(
     label_len=48,
     pred_len=96,
     save_dir="checkpoints",
+    seed=42,
+    num_workers=0,
 ):
+    set_seed(seed)
+
     raw_data = load_csv_dataset(file_path)
 
     n = len(raw_data)
@@ -164,11 +182,30 @@ def run_training(
     val_dataset = TimeSeriesDataset(val_data, configs.seq_len, configs.pred_len)
     test_dataset = TimeSeriesDataset(test_data, configs.seq_len, configs.pred_len)
 
-    train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
-    val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False)
-    test_loader = DataLoader(test_dataset, batch_size=batch_size, shuffle=False)
-
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    pin_memory = device.type == "cuda"
+
+    train_loader = DataLoader(
+        train_dataset,
+        batch_size=batch_size,
+        shuffle=True,
+        num_workers=num_workers,
+        pin_memory=pin_memory,
+    )
+    val_loader = DataLoader(
+        val_dataset,
+        batch_size=batch_size,
+        shuffle=False,
+        num_workers=num_workers,
+        pin_memory=pin_memory,
+    )
+    test_loader = DataLoader(
+        test_dataset,
+        batch_size=batch_size,
+        shuffle=False,
+        num_workers=num_workers,
+        pin_memory=pin_memory,
+    )
 
     model = get_model(model_name, configs).to(device)
     criterion = nn.MSELoss()
@@ -176,6 +213,10 @@ def run_training(
 
     print(f"Training {model_name} on {file_path}")
     print(f"Using device: {device}")
+    print(
+        f"seq_len={seq_len}, label_len={label_len}, pred_len={pred_len}, "
+        f"batch_size={batch_size}, lr={lr}, patience={patience}, seed={seed}"
+    )
 
     best_val_mse = float("inf")
     best_val_mae = None
@@ -229,15 +270,27 @@ def run_training(
     test_mse, test_mae = evaluate(model, test_loader, criterion, configs, device)
     test_inference_time = time.time() - test_start
 
+    results = {
+        "model": model_name,
+        "data": file_path,
+        "best_epoch": best_epoch,
+        "best_val_mse": best_val_mse,
+        "best_val_mae": best_val_mae,
+        "test_mse": test_mse,
+        "test_mae": test_mae,
+        "total_training_time": total_train_time,
+        "test_inference_time": test_inference_time,
+    }
+
     print()
     print("Final Summary")
-    print(f"Best Epoch: {best_epoch}")
-    print(f"Best Val MSE: {best_val_mse:.4f}")
-    print(f"Best Val MAE: {best_val_mae:.4f}")
-    print(f"Test MSE: {test_mse:.4f}")
-    print(f"Test MAE: {test_mae:.4f}")
-    print(f"Total Training Time: {total_train_time:.2f}s")
-    print(f"Test Inference Time: {test_inference_time:.2f}s")
+    for key, value in results.items():
+        if isinstance(value, float):
+            print(f"{key}: {value:.4f}")
+        else:
+            print(f"{key}: {value}")
+
+    return results
 
 
 def parse_args():
@@ -253,6 +306,8 @@ def parse_args():
     parser.add_argument("--label_len", type=int, default=48)
     parser.add_argument("--pred_len", type=int, default=96)
     parser.add_argument("--save_dir", type=str, default="checkpoints")
+    parser.add_argument("--seed", type=int, default=42)
+    parser.add_argument("--num_workers", type=int, default=0)
     return parser.parse_args()
 
 
@@ -269,4 +324,6 @@ if __name__ == "__main__":
         label_len=args.label_len,
         pred_len=args.pred_len,
         save_dir=args.save_dir,
+        seed=args.seed,
+        num_workers=args.num_workers,
     )
