@@ -12,62 +12,19 @@ class Transpose(nn.Module):
         return x.transpose(*self.dims)
 
 
-class RevIN(nn.Module):
-    """Reversible Instance Normalization (Kim et al., 2022).
-    Normalizes per-instance before encoding, denormalizes after prediction."""
-
-    def __init__(self, num_features, eps=1e-5, affine=False):
-        super().__init__()
-        self.num_features = num_features
-        self.eps = eps
-        self.affine = affine
-        if affine:
-            self.affine_weight = nn.Parameter(torch.ones(num_features))
-            self.affine_bias = nn.Parameter(torch.zeros(num_features))
-
-    def forward(self, x, mode):
-        """x: [B, T, C]"""
-        if mode == "norm":
-            self._get_statistics(x)
-            x = self._normalize(x)
-        elif mode == "denorm":
-            x = self._denormalize(x)
-        return x
-
-    def _get_statistics(self, x):
-        self.mean = x.mean(dim=1, keepdim=True).detach()
-        self.stdev = torch.sqrt(
-            x.var(dim=1, keepdim=True, unbiased=False) + self.eps
-        ).detach()
-
-    def _normalize(self, x):
-        x = (x - self.mean) / self.stdev
-        if self.affine:
-            x = x * self.affine_weight + self.affine_bias
-        return x
-
-    def _denormalize(self, x):
-        if self.affine:
-            x = (x - self.affine_bias) / (self.affine_weight + self.eps * self.eps)
-        x = x * self.stdev + self.mean
-        return x
-
-
 class ScaledDotProductAttention(nn.Module):
     def __init__(self, d_k, attn_dropout=0.0):
         super().__init__()
         self.scale = d_k ** -0.5
         self.dropout = nn.Dropout(attn_dropout)
 
-    def forward(self, q, k, v, prev=None):
+    def forward(self, q, k, v):
         # q, k, v: [B, H, N, d_k]
         attn_scores = torch.matmul(q, k.transpose(-2, -1)) * self.scale
-        if prev is not None:
-            attn_scores = attn_scores + prev
         attn_weights = F.softmax(attn_scores, dim=-1)
         attn_weights = self.dropout(attn_weights)
         output = torch.matmul(attn_weights, v)
-        return output, attn_scores
+        return output
 
 
 class MultiHeadAttention(nn.Module):
@@ -84,20 +41,20 @@ class MultiHeadAttention(nn.Module):
         self.attn = ScaledDotProductAttention(self.d_k, attn_dropout)
         self.proj_dropout = nn.Dropout(proj_dropout)
 
-    def forward(self, Q, K, V, prev=None):
+    def forward(self, Q, K, V):
         B, N, _ = Q.shape
         # Project and reshape to [B, H, N, d_k]
         q = self.W_Q(Q).view(B, N, self.n_heads, self.d_k).transpose(1, 2)
         k = self.W_K(K).view(B, N, self.n_heads, self.d_k).transpose(1, 2)
         v = self.W_V(V).view(B, N, self.n_heads, self.d_v).transpose(1, 2)
 
-        output, attn_scores = self.attn(q, k, v, prev=prev)
+        output = self.attn(q, k, v)
 
         # [B, H, N, d_v] -> [B, N, H*d_v]
         output = output.transpose(1, 2).contiguous().view(B, N, -1)
         output = self.W_O(output)
         output = self.proj_dropout(output)
-        return output, attn_scores
+        return output
 
 
 class TSTEncoderLayer(nn.Module):
@@ -120,14 +77,14 @@ class TSTEncoderLayer(nn.Module):
         self.dropout_attn = nn.Dropout(dropout)
         self.dropout_ffn = nn.Dropout(dropout)
 
-    def forward(self, src, prev=None):
+    def forward(self, src):
         # Self-attention with residual + post-norm
-        attn_out, scores = self.self_attn(src, src, src, prev=prev)
+        attn_out = self.self_attn(src, src, src)
         src = self.norm_attn(src + self.dropout_attn(attn_out))
         # FFN with residual + post-norm
         ff_out = self.ff(src)
         src = self.norm_ffn(src + self.dropout_ffn(ff_out))
-        return src, scores
+        return src
 
 
 class TSTEncoder(nn.Module):
@@ -136,9 +93,8 @@ class TSTEncoder(nn.Module):
         self.layers = nn.ModuleList(layers)
 
     def forward(self, src):
-        scores = None
         for layer in self.layers:
-            src, scores = layer(src, prev=scores)
+            src = layer(src)
         return src
 
 
@@ -212,8 +168,6 @@ class Model(nn.Module):
         self.padding = self.patch_len - self.stride
         self.num_patches = ((self.seq_len - self.patch_len) // self.stride) + 2
 
-        self.revin_layer = RevIN(configs.enc_in)
-
         self.patch_embedding = PatchEmbedding(
             patch_len=self.patch_len,
             stride=self.stride,
@@ -239,8 +193,10 @@ class Model(nn.Module):
         x_enc: [B, seq_len, C]
         returns: [B, pred_len, C]
         """
-        # RevIN normalize
-        x_enc = self.revin_layer(x_enc, "norm")
+        # Instance normalization
+        mean = x_enc.mean(dim=1, keepdim=True).detach()
+        stdev = torch.sqrt(x_enc.var(dim=1, keepdim=True, unbiased=False) + 1e-5).detach()
+        x_enc = (x_enc - mean) / stdev
 
         B, L, C = x_enc.shape
 
@@ -259,8 +215,8 @@ class Model(nn.Module):
         # [B*C, pred_len] -> [B, pred_len, C]
         x = x.reshape(B, C, self.pred_len).permute(0, 2, 1)
 
-        # RevIN denormalize
-        x = self.revin_layer(x, "denorm")
+        # Denormalize
+        x = x * stdev + mean
 
         return x
 

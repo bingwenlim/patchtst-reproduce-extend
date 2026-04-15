@@ -6,7 +6,7 @@
 
 | Model | Config | MSE (Paper) | MSE (Ours) | MAE (Paper) | MAE (Ours) | Best Epoch | Time |
 |-------|--------|-------------|------------|-------------|------------|------------|------|
-| PatchTST | ETTh1 | 0.375 | 0.378 | 0.399 | 0.400 | 48 | 287s (MPS) |
+| PatchTST | ETTh1 | 0.375 | 0.378 | 0.399 | 0.400 | 48 | 262s (MPS) |
 | DLinear | default | 0.375 | 0.374 | 0.399 | 0.397 | 43 | 9s (MPS) |
 | Autoformer | default | 0.435 | 0.528 | 0.446 | 0.491 | 6 | 1205s (MPS) |
 | Autoformer | ETTh1 | — | 0.684 | — | 0.556 | 11 | 146s (MPS) |
