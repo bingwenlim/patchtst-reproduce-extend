@@ -1,39 +1,157 @@
-import math
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 
 
-class PositionalEncoding(nn.Module):
-    def __init__(self, d_model, max_len=5000):
+class Transpose(nn.Module):
+    def __init__(self, *dims):
         super().__init__()
-
-        pe = torch.zeros(max_len, d_model)
-        position = torch.arange(0, max_len, dtype=torch.float32).unsqueeze(1)
-        div_term = torch.exp(
-            torch.arange(0, d_model, 2, dtype=torch.float32)
-            * (-math.log(10000.0) / d_model)
-        )
-
-        pe[:, 0::2] = torch.sin(position * div_term)
-        pe[:, 1::2] = torch.cos(position * div_term)
-        pe = pe.unsqueeze(0)  # [1, max_len, d_model]
-
-        self.register_buffer("pe", pe)
+        self.dims = dims
 
     def forward(self, x):
-        # x: [B, N, d_model]
-        return self.pe[:, :x.size(1), :]
+        return x.transpose(*self.dims)
+
+
+class RevIN(nn.Module):
+    """Reversible Instance Normalization (Kim et al., 2022).
+    Normalizes per-instance before encoding, denormalizes after prediction."""
+
+    def __init__(self, num_features, eps=1e-5, affine=False):
+        super().__init__()
+        self.num_features = num_features
+        self.eps = eps
+        self.affine = affine
+        if affine:
+            self.affine_weight = nn.Parameter(torch.ones(num_features))
+            self.affine_bias = nn.Parameter(torch.zeros(num_features))
+
+    def forward(self, x, mode):
+        """x: [B, T, C]"""
+        if mode == "norm":
+            self._get_statistics(x)
+            x = self._normalize(x)
+        elif mode == "denorm":
+            x = self._denormalize(x)
+        return x
+
+    def _get_statistics(self, x):
+        self.mean = x.mean(dim=1, keepdim=True).detach()
+        self.stdev = torch.sqrt(
+            x.var(dim=1, keepdim=True, unbiased=False) + self.eps
+        ).detach()
+
+    def _normalize(self, x):
+        x = (x - self.mean) / self.stdev
+        if self.affine:
+            x = x * self.affine_weight + self.affine_bias
+        return x
+
+    def _denormalize(self, x):
+        if self.affine:
+            x = (x - self.affine_bias) / (self.affine_weight + self.eps * self.eps)
+        x = x * self.stdev + self.mean
+        return x
+
+
+class ScaledDotProductAttention(nn.Module):
+    def __init__(self, d_k, attn_dropout=0.0):
+        super().__init__()
+        self.scale = d_k ** -0.5
+        self.dropout = nn.Dropout(attn_dropout)
+
+    def forward(self, q, k, v, prev=None):
+        # q, k, v: [B, H, N, d_k]
+        attn_scores = torch.matmul(q, k.transpose(-2, -1)) * self.scale
+        if prev is not None:
+            attn_scores = attn_scores + prev
+        attn_weights = F.softmax(attn_scores, dim=-1)
+        attn_weights = self.dropout(attn_weights)
+        output = torch.matmul(attn_weights, v)
+        return output, attn_scores
+
+
+class MultiHeadAttention(nn.Module):
+    def __init__(self, d_model, n_heads, attn_dropout=0.0, proj_dropout=0.0):
+        super().__init__()
+        self.n_heads = n_heads
+        self.d_k = d_model // n_heads
+        self.d_v = d_model // n_heads
+
+        self.W_Q = nn.Linear(d_model, self.d_k * n_heads, bias=True)
+        self.W_K = nn.Linear(d_model, self.d_k * n_heads, bias=True)
+        self.W_V = nn.Linear(d_model, self.d_v * n_heads, bias=True)
+        self.W_O = nn.Linear(self.d_v * n_heads, d_model, bias=False)
+        self.attn = ScaledDotProductAttention(self.d_k, attn_dropout)
+        self.proj_dropout = nn.Dropout(proj_dropout)
+
+    def forward(self, Q, K, V, prev=None):
+        B, N, _ = Q.shape
+        # Project and reshape to [B, H, N, d_k]
+        q = self.W_Q(Q).view(B, N, self.n_heads, self.d_k).transpose(1, 2)
+        k = self.W_K(K).view(B, N, self.n_heads, self.d_k).transpose(1, 2)
+        v = self.W_V(V).view(B, N, self.n_heads, self.d_v).transpose(1, 2)
+
+        output, attn_scores = self.attn(q, k, v, prev=prev)
+
+        # [B, H, N, d_v] -> [B, N, H*d_v]
+        output = output.transpose(1, 2).contiguous().view(B, N, -1)
+        output = self.W_O(output)
+        output = self.proj_dropout(output)
+        return output, attn_scores
+
+
+class TSTEncoderLayer(nn.Module):
+    def __init__(self, d_model, n_heads, d_ff, dropout=0.2):
+        super().__init__()
+        self.self_attn = MultiHeadAttention(d_model, n_heads, proj_dropout=dropout)
+        self.ff = nn.Sequential(
+            nn.Linear(d_model, d_ff, bias=True),
+            nn.GELU(),
+            nn.Dropout(dropout),
+            nn.Linear(d_ff, d_model, bias=True),
+        )
+        # BatchNorm via transpose trick (BN expects [B, C, L])
+        self.norm_attn = nn.Sequential(
+            Transpose(1, 2), nn.BatchNorm1d(d_model), Transpose(1, 2)
+        )
+        self.norm_ffn = nn.Sequential(
+            Transpose(1, 2), nn.BatchNorm1d(d_model), Transpose(1, 2)
+        )
+        self.dropout_attn = nn.Dropout(dropout)
+        self.dropout_ffn = nn.Dropout(dropout)
+
+    def forward(self, src, prev=None):
+        # Self-attention with residual + post-norm
+        attn_out, scores = self.self_attn(src, src, src, prev=prev)
+        src = self.norm_attn(src + self.dropout_attn(attn_out))
+        # FFN with residual + post-norm
+        ff_out = self.ff(src)
+        src = self.norm_ffn(src + self.dropout_ffn(ff_out))
+        return src, scores
+
+
+class TSTEncoder(nn.Module):
+    def __init__(self, layers):
+        super().__init__()
+        self.layers = nn.ModuleList(layers)
+
+    def forward(self, src):
+        scores = None
+        for layer in self.layers:
+            src, scores = layer(src, prev=scores)
+        return src
 
 
 class PatchEmbedding(nn.Module):
-    def __init__(self, patch_len, stride, d_model, dropout):
+    def __init__(self, patch_len, stride, num_patches, d_model, dropout):
         super().__init__()
         self.patch_len = patch_len
         self.stride = stride
         self.padding = patch_len - stride
 
-        self.patch_proj = nn.Linear(patch_len, d_model, bias=False)
-        self.pos_encoding = PositionalEncoding(d_model)
+        self.patch_proj = nn.Linear(patch_len, d_model)
+        self.W_pos = nn.Parameter(torch.empty(num_patches, d_model))
+        nn.init.uniform_(self.W_pos, -0.02, 0.02)
         self.dropout = nn.Dropout(dropout)
 
     def forward(self, x):
@@ -46,25 +164,22 @@ class PatchEmbedding(nn.Module):
             pad = x[:, -1:].repeat(1, self.padding)
             x = torch.cat([x, pad], dim=1)
 
-        # Unfold into patches
-        # x_unfold: [B*C, num_patches, patch_len]
+        # Unfold into patches: [B*C, num_patches, patch_len]
         x = x.unfold(dimension=1, size=self.patch_len, step=self.stride)
 
-        # Linear projection
-        x = self.patch_proj(x)  # [B*C, num_patches, d_model]
+        # Linear projection + learnable positional encoding
+        x = self.patch_proj(x)
+        x = self.dropout(x + self.W_pos)
 
-        # Add positional encoding
-        x = x + self.pos_encoding(x)
-
-        return self.dropout(x)
+        return x
 
 
 class PredictionHead(nn.Module):
-    def __init__(self, num_patches, d_model, pred_len, dropout):
+    def __init__(self, num_patches, d_model, pred_len, head_dropout=0.0):
         super().__init__()
         self.flatten = nn.Flatten(start_dim=1)
-        self.dropout = nn.Dropout(dropout)
         self.linear = nn.Linear(num_patches * d_model, pred_len)
+        self.dropout = nn.Dropout(head_dropout)
 
     def forward(self, x):
         """
@@ -72,8 +187,8 @@ class PredictionHead(nn.Module):
         returns: [B*C, pred_len]
         """
         x = self.flatten(x)
-        x = self.dropout(x)
         x = self.linear(x)
+        x = self.dropout(x)
         return x
 
 
@@ -86,44 +201,37 @@ class Model(nn.Module):
         self.pred_len = configs.pred_len
         self.enc_in = configs.enc_in
 
-        self.patch_len = getattr(configs, "patch_len", 16)
-        self.stride = getattr(configs, "stride", 8)
-        self.d_model = getattr(configs, "d_model", 128)
-        self.n_heads = getattr(configs, "n_heads", 16)
-        self.e_layers = getattr(configs, "e_layers", 3)
-        self.d_ff = getattr(configs, "d_ff", 256)
-        self.dropout = getattr(configs, "dropout", 0.2)
+        self.patch_len = configs.patch_len
+        self.stride = configs.stride
+        self.d_model = configs.d_model
+        self.n_heads = configs.n_heads
+        self.e_layers = configs.e_layers
+        self.d_ff = configs.d_ff
+        self.dropout = configs.dropout
 
         self.padding = self.patch_len - self.stride
         self.num_patches = ((self.seq_len - self.patch_len) // self.stride) + 2
 
+        self.revin_layer = RevIN(configs.enc_in)
+
         self.patch_embedding = PatchEmbedding(
             patch_len=self.patch_len,
             stride=self.stride,
+            num_patches=self.num_patches,
             d_model=self.d_model,
             dropout=self.dropout,
         )
 
-        encoder_layer = nn.TransformerEncoderLayer(
-            d_model=self.d_model,
-            nhead=self.n_heads,
-            dim_feedforward=self.d_ff,
-            dropout=self.dropout,
-            batch_first=True,
-            norm_first=True,
-            activation="gelu",
-        )
-
-        self.encoder = nn.TransformerEncoder(
-            encoder_layer,
-            num_layers=self.e_layers,
-        )
+        self.encoder = TSTEncoder([
+            TSTEncoderLayer(self.d_model, self.n_heads, self.d_ff, self.dropout)
+            for _ in range(self.e_layers)
+        ])
 
         self.head = PredictionHead(
             num_patches=self.num_patches,
             d_model=self.d_model,
             pred_len=self.pred_len,
-            dropout=self.dropout,
+            head_dropout=0.0,
         )
 
     def forecast(self, x_enc):
@@ -131,14 +239,13 @@ class Model(nn.Module):
         x_enc: [B, seq_len, C]
         returns: [B, pred_len, C]
         """
+        # RevIN normalize
+        x_enc = self.revin_layer(x_enc, "norm")
+
         B, L, C = x_enc.shape
 
-        # Channel independence:
-        # [B, seq_len, C] -> [B, C, seq_len]
-        x = x_enc.permute(0, 2, 1)
-
-        # [B, C, seq_len] -> [B*C, seq_len]
-        x = x.reshape(B * C, L)
+        # Channel independence: [B, seq_len, C] -> [B*C, seq_len]
+        x = x_enc.permute(0, 2, 1).reshape(B * C, L)
 
         # Patch embedding
         x = self.patch_embedding(x)  # [B*C, num_patches, d_model]
@@ -149,11 +256,11 @@ class Model(nn.Module):
         # Prediction head
         x = self.head(x)  # [B*C, pred_len]
 
-        # [B*C, pred_len] -> [B, C, pred_len]
-        x = x.reshape(B, C, self.pred_len)
+        # [B*C, pred_len] -> [B, pred_len, C]
+        x = x.reshape(B, C, self.pred_len).permute(0, 2, 1)
 
-        # [B, C, pred_len] -> [B, pred_len, C]
-        x = x.permute(0, 2, 1)
+        # RevIN denormalize
+        x = self.revin_layer(x, "denorm")
 
         return x
 
