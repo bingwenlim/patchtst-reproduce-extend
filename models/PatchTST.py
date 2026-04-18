@@ -130,6 +130,106 @@ class PatchEmbedding(nn.Module):
         return x
 
 
+class AdaptiveCrossChannelAttention(nn.Module):
+    def __init__(self, c_in, d_model_or_len, n_heads=4, dropout=0.1, alpha_mode='learned', acca_type='attention', acca_placement='pre_head', alpha_init=-4.6):
+        super().__init__()
+        self.c_in = c_in
+        self.d_model = d_model_or_len
+        self.acca_type = acca_type
+        self.acca_placement = acca_placement
+        self.alpha_mode = alpha_mode
+        self._first_forward = True
+
+        if alpha_mode == 'learned':
+            self._alpha_raw = nn.Parameter(torch.tensor([float(alpha_init)], dtype=torch.float32).view(1, 1, 1))
+        elif alpha_mode == 'fixed_zero':
+            self.register_buffer('_alpha_raw', torch.tensor([-float('inf')], dtype=torch.float32).view(1, 1, 1))
+        elif alpha_mode == 'fixed_one':
+            self.register_buffer('_alpha_raw', torch.tensor([float('inf')], dtype=torch.float32).view(1, 1, 1))
+        else:
+            raise ValueError(f"Unknown alpha_mode: {alpha_mode}")
+
+        if acca_type == 'attention':
+            self.n_heads = min(n_heads, max(1, c_in // 2))
+            
+            # Ensure d_model is divisible by n_heads
+            if self.d_model % self.n_heads != 0:
+                 for i in range(self.n_heads, 0, -1):
+                     if self.d_model % i == 0:
+                         self.n_heads = i
+                         break
+            
+            self.mha = nn.MultiheadAttention(embed_dim=self.d_model, num_heads=self.n_heads, dropout=dropout, batch_first=True)
+            self.norm = nn.LayerNorm(self.d_model)
+            self.dropout = nn.Dropout(dropout)
+        elif acca_type == 'linear':
+            self.linear = nn.Linear(c_in, c_in)
+        else:
+            raise ValueError(f"Unknown acca_type: {acca_type}")
+
+    @property
+    def alpha_raw(self):
+        return self._alpha_raw.flatten()[0].item()
+
+    @property
+    def alpha_effective(self):
+        return torch.sigmoid(self._alpha_raw).flatten()[0].item()
+
+    def forward(self, x):
+        alpha = torch.sigmoid(self._alpha_raw)
+        
+        if self.acca_placement == 'pre_head':
+            # x is [B*C, P, D] where P is num_patches
+            bc, p, d = x.shape
+            b = bc // self.c_in
+            c = self.c_in
+            
+            if self._first_forward:
+                self._first_forward = False
+                probe = torch.zeros(b, c, p, d, device=x.device)
+                b_idx = torch.arange(b, device=x.device).view(b, 1, 1, 1)
+                c_idx = torch.arange(c, device=x.device).view(1, c, 1, 1)
+                p_idx = torch.arange(p, device=x.device).view(1, 1, p, 1)
+                d_idx = torch.arange(d, device=x.device).view(1, 1, 1, d)
+                probe = b_idx * 1000000 + c_idx * 10000 + p_idx * 100 + d_idx
+                
+                probe_flattened = probe.reshape(bc, p, d)
+                probe_reshaped = probe_flattened.view(b, c, p, d)
+                assert torch.equal(probe_reshaped, probe), "Reshape mixed batches and channels!"
+            
+            x_reshaped = x.view(b, c, p, d)
+            # attention across channels: [B*P, C, D]
+            x_transposed = x_reshaped.permute(0, 2, 1, 3).reshape(b * p, c, d)
+            
+            if self.acca_type == 'attention':
+                attn_out, _ = self.mha(x_transposed, x_transposed, x_transposed)
+                h = self.norm(x_transposed + self.dropout(attn_out))
+            else: # linear
+                h = self.linear(x_transposed.transpose(1, 2)).transpose(1, 2)
+                
+            out_transposed = x_transposed + alpha * (h - x_transposed)
+            # Back to [B*C, P, D]
+            out = out_transposed.view(b, p, c, d).permute(0, 2, 1, 3).reshape(bc, p, d)
+            return out
+            
+        elif self.acca_placement == 'post_head':
+            # x is [B*C, pred_len]
+            bc, l = x.shape
+            b = bc // self.c_in
+            c = self.c_in
+            
+            x_t = x.view(b, c, l)
+            
+            if self.acca_type == 'attention':
+                attn_out, _ = self.mha(x_t, x_t, x_t)
+                h = self.norm(x_t + self.dropout(attn_out))
+            else:
+                h = self.linear(x_t.transpose(1, 2)).transpose(1, 2)
+                
+            out = x_t + alpha * (h - x_t)
+            return out.view(bc, l)
+
+
 class PredictionHead(nn.Module):
     def __init__(self, num_patches, d_model, pred_len, head_dropout=0.0):
         super().__init__()
@@ -188,6 +288,22 @@ class Model(nn.Module):
             head_dropout=0.0,
         )
 
+        self.use_acca = getattr(configs, 'use_acca', False)
+        if self.use_acca:
+            with torch.random.fork_rng():
+                self.acca_placement = getattr(configs, 'acca_placement', 'pre_head')
+                d_acca = self.d_model if self.acca_placement == 'pre_head' else self.pred_len
+                self.acca = AdaptiveCrossChannelAttention(
+                    c_in=self.enc_in,
+                    d_model_or_len=d_acca,
+                    n_heads=getattr(configs, 'acca_n_heads', self.n_heads),
+                    dropout=self.dropout,
+                    alpha_mode=getattr(configs, 'alpha_mode', 'learned'),
+                    alpha_init=getattr(configs, 'alpha_init', -4.6),
+                    acca_type=getattr(configs, 'acca_type', 'attention'),
+                    acca_placement=self.acca_placement
+                )
+
     def forecast(self, x_enc):
         """
         x_enc: [B, seq_len, C]
@@ -209,8 +325,14 @@ class Model(nn.Module):
         # Transformer encoder
         x = self.encoder(x)  # [B*C, num_patches, d_model]
 
+        if getattr(self, 'use_acca', False) and getattr(self, 'acca_placement', '') == 'pre_head':
+            x = self.acca(x)
+
         # Prediction head
         x = self.head(x)  # [B*C, pred_len]
+
+        if getattr(self, 'use_acca', False) and getattr(self, 'acca_placement', '') == 'post_head':
+            x = self.acca(x)
 
         # [B*C, pred_len] -> [B, pred_len, C]
         x = x.reshape(B, C, self.pred_len).permute(0, 2, 1)
