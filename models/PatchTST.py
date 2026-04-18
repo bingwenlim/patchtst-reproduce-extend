@@ -30,7 +30,7 @@ class ScaledDotProductAttention(nn.Module):
 
 
 class MultiHeadAttention(nn.Module):
-    def __init__(self, d_model, n_heads, attn_dropout=0.0, proj_dropout=0.0):
+    def __init__(self, d_model, n_heads, attn_dropout=0.0):
         super().__init__()
         self.n_heads = n_heads
         self.d_k = d_model // n_heads
@@ -41,7 +41,6 @@ class MultiHeadAttention(nn.Module):
         self.W_V = nn.Linear(d_model, self.d_v * n_heads, bias=True)
         self.W_O = nn.Linear(self.d_v * n_heads, d_model, bias=False)
         self.attn = ScaledDotProductAttention(self.d_k, attn_dropout)
-        self.proj_dropout = nn.Dropout(proj_dropout)
 
     def forward(self, Q, K, V):
         B, N, _ = Q.shape
@@ -55,14 +54,13 @@ class MultiHeadAttention(nn.Module):
         # [B, H, N, d_v] -> [B, N, H*d_v]
         output = output.transpose(1, 2).contiguous().view(B, N, -1)
         output = self.W_O(output)
-        output = self.proj_dropout(output)
         return output
 
 
 class TSTEncoderLayer(nn.Module):
     def __init__(self, d_model, n_heads, d_ff, dropout=0.2):
         super().__init__()
-        self.self_attn = MultiHeadAttention(d_model, n_heads, proj_dropout=dropout)
+        self.self_attn = MultiHeadAttention(d_model, n_heads)
         self.ff = nn.Sequential(
             nn.Linear(d_model, d_ff, bias=True),
             nn.GELU(),
