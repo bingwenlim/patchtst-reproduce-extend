@@ -1,5 +1,21 @@
 # patchtst-reproduce-extend
-Replication and extension of PatchTST for time series forecasting. For DSA5106 Group 23.
+Replication and extension of PatchTST by Group 23 for DSA5106.
+
+## Extending PatchTST with ACCA
+
+We extended the original Channel Independent PatchTST with **Adaptive Cross-Channel Attention (ACCA)** module. The ACCA module enables our model to explicitly model cross-channel (inter-variable) temporal dynamics by blending the representations of different specific channels back into the standard representation via a learned gating scalar `alpha`.
+
+### ACCA Configuration
+
+You can enable ACCA directly via the CLI:
+*   `--use_acca`: Enables the Adaptive Cross-Channel Attention module.
+*   `--acca_type`: Type of relation modeling across channels. Can be `attention` (Multi-Head) or `linear`. Default: `attention`.
+*   `--acca_placement`: Injection placement relative to the final model prediction head. Options are `pre_head` or `post_head`. Default: `pre_head`.
+*   `--alpha_mode`: Governs how the alpha blending gate works. `learned` computes grads via backprop, `fixed_zero` (baseline PatchTST logic), `fixed_one` (full overwrite). Default: `learned`.
+
+```bash
+uv run python train.py --model PatchTST --dataset ETTh1 --use_acca --acca_type linear --acca_placement pre_head
+```
 
 ## Setup
 
@@ -52,26 +68,26 @@ uv run python train.py --model Autoformer
 
 ### CLI arguments
 
-| Argument | Default | Description |
-|----------|---------|-------------|
-| `--model` | PatchTST | Model name: PatchTST, DLinear, Autoformer |
-| `--dataset` | ETTh1 | Dataset name (must be registered in data_provider.py) |
-| `--epochs` | 100 | Max training epochs |
-| `--batch_size` | 128 | Batch size |
-| `--patience` | 10 | Early stopping patience |
-| `--lr` | 1e-4 | Learning rate |
-| `--seq_len` | 336 | Input sequence length |
-| `--label_len` | 48 | Decoder label length (Autoformer) |
-| `--pred_len` | 96 | Prediction horizon |
-| `--d_model` | 128 | Transformer latent dimension |
-| `--n_heads` | 16 | Number of attention heads |
-| `--e_layers` | 3 | Number of encoder layers |
-| `--d_ff` | 256 | Feed-forward hidden dimension |
-| `--dropout` | 0.2 | Dropout rate |
-| `--patch_len` | 16 | Patch length (PatchTST) |
-| `--stride` | 8 | Patch stride (PatchTST) |
-| `--seed` | 42 | Random seed |
-| `--save_dir` | checkpoints | Checkpoint save directory |
+| Argument       | Default     | Description                                           |
+| -------------- | ----------- | ----------------------------------------------------- |
+| `--model`      | PatchTST    | Model name: PatchTST, DLinear, Autoformer             |
+| `--dataset`    | ETTh1       | Dataset name (must be registered in data_provider.py) |
+| `--epochs`     | 100         | Max training epochs                                   |
+| `--batch_size` | 128         | Batch size                                            |
+| `--patience`   | 10          | Early stopping patience                               |
+| `--lr`         | 1e-4        | Learning rate                                         |
+| `--seq_len`    | 336         | Input sequence length                                 |
+| `--label_len`  | 48          | Decoder label length (Autoformer)                     |
+| `--pred_len`   | 96          | Prediction horizon                                    |
+| `--d_model`    | 128         | Transformer latent dimension                          |
+| `--n_heads`    | 16          | Number of attention heads                             |
+| `--e_layers`   | 3           | Number of encoder layers                              |
+| `--d_ff`       | 256         | Feed-forward hidden dimension                         |
+| `--dropout`    | 0.2         | Dropout rate                                          |
+| `--patch_len`  | 16          | Patch length (PatchTST)                               |
+| `--stride`     | 8           | Patch stride (PatchTST)                               |
+| `--seed`       | 42          | Random seed                                           |
+| `--save_dir`   | checkpoints | Checkpoint save directory                             |
 
 ### Output
 
