@@ -56,6 +56,18 @@ def get_dataset(name, seq_len, pred_len, label_len):
             file_path="data/ett.csv",
             seq_len=seq_len, pred_len=pred_len, label_len=label_len,
         )
+    # 1 of the 2 additional standard benchmark dataset to confirm paper's reported performance  
+    elif name == "traffic":
+        return _get_traffic_dataset(
+            file_path="data/processed_traffic.csv",
+            seq_len=seq_len, pred_len=pred_len, label_len=label_len,
+        )
+    # 2 of the 2 additional standard benchmark dataset to confirm paper's reported performance 
+    elif name == "air":
+        return _get_air_dataset(
+            file_path="data/processed_air.csv",
+            seq_len=seq_len, pred_len=pred_len, label_len=label_len,
+        )
     raise ValueError(f"Unknown dataset: {name}")
 
 
@@ -103,6 +115,103 @@ def _get_ett_datasets(file_path, seq_len, pred_len, label_len):
         b1, b2 = border1s[i], border2s[i]
         datasets[name] = TimeSeriesDataset(
             scaled[b1:b2], seq_len, pred_len, label_len, marks[b1:b2],
+        )
+
+    return datasets, enc_in
+
+
+def _get_traffic_dataset(file_path, seq_len, pred_len, label_len):
+    """Load preprocessed traffic data, prepare for time series forecasting"""
+    df = pd.read_csv(file_path)
+    # Use 10% of data for a simple run to see if code works: uncomment below
+    # df = df[:int(len(df) * 0.1)]
+    
+    target_col = 'traffic_volume'
+    numeric_cols = df.select_dtypes(include=[np.number]).columns.tolist()
+    feature_cols = [col for col in numeric_cols if col != target_col]
+    all_cols = feature_cols + [target_col]
+
+    raw_data = df[all_cols].to_numpy(dtype=np.float32)
+    
+    marks = time_features(df["date"])
+    
+    # Split data (70% train, 15% val, 15% test)
+    total_len = len(df)
+    train_end = int(total_len * 0.7)
+    val_end = int(total_len * 0.85)
+    
+    # Adjust borders for lookback overlap
+    border1s = [0, train_end - seq_len, val_end - seq_len]
+    border2s = [train_end, val_end, total_len]
+    
+    # Normalise with only the training data 
+    train_portion = raw_data[:train_end]
+    mean = train_portion.mean(axis=0, keepdims=True)
+    std = train_portion.std(axis=0, keepdims=True)
+    std[std == 0] = 1.0
+    scaled = (raw_data - mean) / std
+    
+    enc_in = raw_data.shape[1]
+    
+    datasets = {}
+    for i, name in enumerate(["train", "val", "test"]):
+        b1, b2 = border1s[i], border2s[i]
+
+        datasets[name] = TimeSeriesDataset(
+            scaled[b1:b2],
+            seq_len,
+            pred_len,
+            label_len,
+            marks[b1:b2],
+        )
+    
+    return datasets, enc_in
+    
+
+def _get_air_dataset(file_path, seq_len, pred_len, label_len):
+    """Load preprocessed air quality data, prepare for time series forecasting"""
+    df = pd.read_csv(file_path)
+    # Use 10% of data for a simple run to see if code works: uncomment below
+    #df = df[:int(len(df) * 0.1)]
+
+    target_col = "pm2.5" 
+    numeric_cols = df.select_dtypes(include=[np.number]).columns.tolist()
+    feature_cols = [col for col in numeric_cols if col != target_col]
+    all_cols = feature_cols + [target_col]
+
+    raw_data = df[all_cols].to_numpy(dtype=np.float32)
+    
+    marks = time_features(df["date"])
+    # Split data (70% train, 15% val, 15% test)
+    total_len = len(df)
+    train_end = int(total_len * 0.7)
+    val_end = int(total_len * 0.85)
+
+    # Adjust borders for lookback overlap
+    border1s = [0, train_end - seq_len, val_end - seq_len]
+    border2s = [train_end, val_end, total_len]
+
+    # Normalise with only the training data 
+    train_portion = raw_data[:train_end]
+    mean = train_portion.mean(axis=0, keepdims=True)
+    std = train_portion.std(axis=0, keepdims=True)
+    std[std == 0] = 1.0
+
+    scaled = (raw_data - mean) / std
+
+    enc_in = raw_data.shape[1]
+
+    # Create dataset
+    datasets = {}
+    for i, name in enumerate(["train", "val", "test"]):
+        b1, b2 = border1s[i], border2s[i]
+
+        datasets[name] = TimeSeriesDataset(
+            scaled[b1:b2],
+            seq_len,
+            pred_len,
+            label_len,
+            marks[b1:b2],
         )
 
     return datasets, enc_in
