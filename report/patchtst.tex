@@ -21,16 +21,16 @@ Patch-Based Transformers for Long-Term Time Series Forecasting}
 \section{Introduction}
 % ============================================================
 
-Long-term time series forecasting (LTSF) is a critical task in fields ranging from energy grid management to financial market analysis. While Transformer architectures have dominated sequence modeling in natural language processing, their application to LTSF has been hindered by a fundamental tokenization problem.  They treat each individual time step as a token, resulting in $O(L^2)$ attention complexity over the sequence length L.  They also have poor inductive bias as a single scalar value carries little semantic meaning on its own.
+Long-term time series forecasting (LTSF) is a critical task in fields ranging from energy grid management to financial market analysis. While Transformer architectures have dominated sequence modeling in natural language processing, their application to LTSF has been hindered by limitations in point-wise tokenization.  They treat each individual time step as a token, resulting in $O(L^2)$ attention complexity over the sequence length L.  They also have poor inductive bias as a single scalar value provides limited contextual information in isolation.
 
-Early Transformer-based forecasting models attempted to improve efficiency and temporal modeling. Informer introduced ProbSparse attention to reduce the quadratic cost \cite{informer}, while Autoformer incorporated seasonal-trend decomposition to try and capture long-term temporal patterns \cite{autoformer}. However, both approaches retain point-wise tokenization of time steps, and therefore do not fundamentally resolve the underlying tokenization limitation. This weakness was highlighted by Zeng et al., who showed that a simple single-layer linear model (DLinear) could match or outperform complex Transformer-based architectures like Autoformer on standard benchmarks \cite{dlinear}.
+Early Transformer-based forecasting models attempted to improve efficiency and temporal modeling. Informer introduced ProbSparse attention to reduce the quadratic cost \cite{informer}, while Autoformer incorporated seasonal-trend decomposition to try and capture long-term temporal patterns \cite{autoformer}. However, neither approach fundamentally departs from point-wise tokenization of time steps. This limitation was empirically highlighted by Zeng et al., who showed that a simple single-layer linear model (DLinear) could match or outperform complex Transformer-based architectures like Autoformer on standard benchmarks \cite{dlinear}.
 
-PatchTST addresses this by borrowing an insight from computer vision: just as images are tokenized into patches rather than pixels, time series can be tokenized into contiguous segments of consecutive time steps. Each patch captures a local temporal pattern (a trend, a spike, or a seasonal fragment) rather than a meaningless point, while reducing the token count by a factor of $S$ where $S$ is the stride length. The model further adopts a Channel-Independent (CI) design, where each variable in a multivariate series is processed as a separate univariate sequence through a shared Transformer backbone. This acts as a powerful regularizer and effectively multiplies the available training data by the number of channels.
+PatchTST addresses this by borrowing an insight from computer vision: just as images are tokenized into patches rather than pixels, time series can be tokenized into contiguous segments of consecutive time steps. Each patch captures a local temporal pattern (a trend, a spike, or a seasonal fragment) rather than a meaningless point, while reducing the number of tokens roughly by a factor of $S$ where $S$ is the stride length. The model further adopts a Channel-Independent (CI) design, where each variable in a multivariate series is processed as a separate univariate sequence through a shared Transformer backbone. This acts as a powerful regularizer and effectively multiplies the available training data by the number of channels.
 In this project, we reproduce and extend PatchTST to evaluate both its claims and its architectural limitations. Our contributions are:
 \begin{itemize}
 \item \textbf{Reproduction from First Principles:} A ground-up PyTorch implementation based on the paper's description, validated on ETTh1 against the paper's reported metrics. We document discrepancies between the paper and the authors' reference code, including the use of RevIN in place of the described instance normalization, and an unconditional padding scheme in the patching formula that we correct.
 \item \textbf{Evaluation on additional datasets:} We evaluate PatchTST, DLinear, and Autoformer on datasets beyond the original benchmarks, including a highly correlated multivariate dataset, to test whether the reported advantages generalize.
-\item \textbf{Cross-Channel Extension:} A cross-channel attention module that relaxes the CI assumption, targeting scenarios where channels share partial temporal patterns and the shared backbone receives conflicting training signals under strict independence.
+\item \textbf{Cross-Channel Extension:} A cross-channel attention module that relaxes the CI assumption, targeting scenarios where channels share partial temporal patterns and the shared backbone may receive conflicting training signals under strict independence.
 
 \end{itemize}
 
@@ -40,155 +40,83 @@ In this project, we reproduce and extend PatchTST to evaluate both its claims an
 
 \subsection{Overview}
 
-PatchTST is an encoder-only Transformer for multivariate long-term forecasting.
-Given an input $\mathbf{X} \in \mathbb{R}^{L \times C}$ with lookback length $L$
-and $C$ channels, the model predicts $\hat{\mathbf{Y}} \in \mathbb{R}^{H \times C}$
-for forecast horizon $H$. The forward pass consists of seven stages:
-instance normalization, channel-independent reshaping, patching with embedding,
-a Transformer encoder, a linear prediction head, reshaping back to multivariate
-form, and denormalization.
+PatchTST is an encoder-only Transformer for multivariate long-term forecasting. Given an input $\mathbf{X} \in \mathbb{R}^{L \times C}$ with lookback length $L$ and $C$ channels, the model predicts $\hat{\mathbf{Y}} \in \mathbb{R}^{H \times C}$ for forecast horizon $H$. The forward pass consists of seven stages: instance normalization, channel-independent reshaping, patching with embedding, a Transformer encoder, a linear prediction head, reshaping back to multivariate form, and denormalization.
 
 \subsection{Instance Normalization}
 
-Before entering the model, each sample is independently normalized along the time
-axis: the per-channel mean and standard deviation are computed, subtracted and
-divided respectively, and saved for later reversal:
+Before entering the model, each sample is independently normalized along the time axis: the per-channel mean and standard deviation are computed, subtracted and divided respectively, and saved for later reversal:
 \begin{equation}
     \tilde{x}_{t,c} = \frac{x_{t,c} - \mu_c}{\sigma_c}, \qquad
     \mu_c = \frac{1}{L}\sum_{t=1}^{L} x_{t,c}, \qquad
     \sigma_c = \sqrt{\frac{1}{L}\sum_{t=1}^{L}(x_{t,c} - \mu_c)^2 + \epsilon}
 \end{equation}
-This is distinct from the dataset-level z-score standardization applied during
-preprocessing, which uses global training set statistics to bring all channels to a
-common scale. Instance normalization operates per-sample, stripping each individual
-window's local level and spread so the model focuses on the shape of the signal
-rather than its absolute position, addressing the non-stationarity inherent in time
-series data. The statistics are detached from the computation graph---the model
-cannot learn to manipulate them through backpropagation.
+This is distinct from the dataset-level z-score standardization applied during preprocessing, which uses global training set statistics to bring all channels to a common scale. Instance normalization operates per-sample, stripping each individual window's local level and spread so the model focuses on the shape of the signal rather than its absolute position, addressing the non-stationarity inherent in time series data. The statistics are detached from the computation graph---the model cannot learn to manipulate them through backpropagation.
 
-Notably, the authors' reference implementation uses RevIN \cite{patchtst_github}, a learned
-normalization module with trainable affine parameters ($\gamma$, $\beta$). The paper
-itself describes only the simpler statistical normalization without learned
-parameters. We implement the paper's description.
+Notably, the official implementation replaces this with RevIN~\cite{patchtst_github}, a learned normalization module with trainable affine parameters ($\gamma$, $\beta$). The paper itself describes only the simpler statistical normalization without learned parameters. We implement the paper's description.
 
 \subsection{Channel Independence}
 
-The input $\mathbf{X} \in \mathbb{R}^{B \times L \times C}$ is reshaped to
-$\mathbb{R}^{(B \cdot C) \times L}$ by treating each channel as an independent
-sample. From this point, the model processes $B \cdot C$ univariate sequences
-through a shared backbone with no cross-channel interaction. This design rests on
-the assumption that cross-channel information is not needed to predict each
-channel's future---whether because channels are independent, or because they share
-sufficiently similar dynamics that a single set of learned temporal patterns serves
-all channels.
+The input $\mathbf{X} \in \mathbb{R}^{B \times L \times C}$ is reshaped to $\mathbb{R}^{(B \cdot C) \times L}$ by treating each channel as an independent sample. From this point, the model processes $B \cdot C$ univariate sequences through a shared backbone with no cross-channel interaction. This design rests on the assumption that useful temporal patterns can be learned independently and shared across channels---whether because channels are independent, or because they share sufficiently similar dynamics that a single set of learned temporal patterns serves all channels.
 
-This assumption provides two concrete benefits: regularization (the model cannot
-overfit to spurious cross-channel correlations) and data efficiency ($C$ times more
-training sequences from the same data). However, it introduces a failure mode when
-channels share partial temporal patterns: the shared backbone receives contradictory
-gradient signals from channels that look similar in the lookback window but diverge
-in the prediction horizon. Our extension in Section~\ref{sec:extension} addresses
-this limitation.
+This assumption provides two concrete benefits: regularization (the model cannot overfit to spurious cross-channel correlations) and data efficiency ($C$ times more training sequences from the same data). However, it introduces a failure mode when channels share partial temporal patterns: the shared backbone may receive contradictory gradient signals from channels that look similar in the lookback window but diverge in the prediction horizon. Our extension in Section~\ref{sec:extension} addresses this limitation.
 
 \subsection{Patching}
 
-The univariate sequences are segmented into overlapping patches using a sliding
-window of length $P$ with stride $S$. The number of patches is:
+The univariate sequences are segmented into overlapping patches using a sliding window of length $P$ with stride $S$. The number of patches is:
 \begin{equation}
     N = \left\lceil\frac{L - P}{S}\right\rceil + 1
 \end{equation}
-When the sequence length does not divide evenly, the final values are replicated to
-complete the last patch. The original paper defines
-$N = \lfloor(L{-}P)/S\rfloor + 2$ and unconditionally pads $S$ values, which
-produces an identical result when padding is needed but creates a redundant patch
-containing fabricated data when the sequence divides cleanly. We adopt the ceiling
-formulation, which pads only when necessary.
+When the sequence length does not divide evenly, the final values are replicated to complete the last patch. The original paper defines $N = \lfloor(L{-}P)/S\rfloor + 2$ and unconditionally pads $S$ values, which produces an identical result when padding is needed but creates a redundant patch containing fabricated data when the sequence divides cleanly. We adopt the ceiling formulation, which pads only when necessary.
 
-Patching reduces the attention complexity from $O(L^2)$ to $O(N^2)$. With typical
-settings ($L{=}336$, $P{=}16$, $S{=}8$), this reduces the token count from 336 to
-41---a $67\times$ reduction in attention cost.
+Patching reduces the attention complexity from $O(L^2)$ to $O(N^2)$. With typical settings ($L{=}336$, $P{=}16$, $S{=}8$), this reduces the token count from 336 to 41 (an ${\approx}8\times$ reduction), and the quadratic attention cost by approximately $67\times$.
 
 \subsection{Patch Embedding}
 
-Each patch of $P$ raw values is projected to a $D$-dimensional representation via a
-shared linear layer. A learnable positional encoding is added to each patch position,
-providing the model with ordering information that the permutation-invariant attention
-mechanism would otherwise lack:
+Each patch of $P$ raw values is projected to a $D$-dimensional representation via a shared linear layer. A learnable positional encoding is added to each patch position, providing the model with ordering information that the permutation-invariant attention mechanism would otherwise lack:
 \begin{equation}
     \mathbf{z}_i = \text{Dropout}\!\left(
-        \mathbf{W}_{\text{proj}}\,\mathbf{p}_i + \mathbf{W}_{\text{pos},i}
+        \mathbf{W}_{\text{proj}}\,\mathbf{p}_i + \mathbf{e}_i
     \right)
 \end{equation}
+where $\mathbf{e}_i$ is the $i$-th row of a learnable positional embedding matrix $\mathbf{E}_{\text{pos}} \in \mathbb{R}^{N \times D}$.
 
 \subsection{Transformer Encoder}
 
 The encoder consists of $M$ identical layers, each containing two sub-blocks:
 \begin{enumerate}
-    \item \textbf{Multi-head self-attention}: The input is projected into queries,
-    keys, and values, split across $H$ attention heads each operating in $D/H$
-    dimensions. Each head independently computes scaled dot-product attention over
-    all $N$ patch tokens, then the heads are concatenated and projected back to $D$
-    dimensions.
-    \item \textbf{Position-wise feed-forward network}: A two-layer MLP
-    ($D \to d_{ff} \to D$) with GELU activation expands and compresses each token's
-    representation independently.
+    \item \textbf{Multi-head self-attention}: The input is projected into queries, keys, and values via learned linear transformations, then split across $H$ attention heads each operating in $D/H$ dimensions. Each head computes scaled dot-product attention over the same set of $N$ patch tokens in a different projected subspace, then the heads are concatenated and projected back to $D$ dimensions.
+    \item \textbf{Position-wise feed-forward network}: A two-layer MLP ($D \to d_{ff} \to D$) with GELU activation expands and compresses each token's representation independently.
 \end{enumerate}
-Both sub-blocks use residual connections followed by BatchNorm---a departure from
-the LayerNorm used in standard Transformers. The normalization is applied
-post-residual (post-norm), meaning the residual is added before normalization:
+Both sub-blocks use residual connections followed by BatchNorm---a departure from the LayerNorm used in standard Transformers. The normalization is applied post-residual (post-norm), meaning the residual is added before normalization:
 \begin{align}
     \mathbf{z}' &= \text{BatchNorm}(\mathbf{z} + \text{Dropout}(\text{MHA}(\mathbf{z}))) \\
     \mathbf{z}'' &= \text{BatchNorm}(\mathbf{z}' + \text{Dropout}(\text{FFN}(\mathbf{z}')))
 \end{align}
-In a channel-independent setting, the effective batch size is $B \cdot C$
-(e.g., $128 \times 7 = 896$), providing the statistical stability that BatchNorm
-requires.
+In a channel-independent setting, the effective batch size is $B \cdot C$ (e.g., $128 \times 7 = 896$), providing the statistical stability that BatchNorm requires.
 
 \subsection{Prediction Head and Denormalization}
 
-The encoder output $\mathbb{R}^{(B \cdot C) \times N \times D}$ is flattened to
-$\mathbb{R}^{(B \cdot C) \times (N \cdot D)}$ and projected to the prediction
-horizon $H$ via a single linear layer with no hidden layers or activation function:
-$\hat{\mathbf{y}} = \mathbf{W}_{\text{head}} [\mathbf{z}_1; \ldots; \mathbf{z}_N]
-+ \mathbf{b}$.
-The output is reshaped back to $\mathbb{R}^{B \times H \times C}$ and denormalized
-using the per-sample statistics saved during instance normalization, restoring the
-predictions to the original data scale.
+The encoder output $\mathbb{R}^{(B \cdot C) \times N \times D}$ is flattened to $\mathbb{R}^{(B \cdot C) \times (N \cdot D)}$ and projected to the prediction horizon $H$ via a single linear layer with no hidden layers or activation function: $\hat{\mathbf{y}} = \mathbf{W}_{\text{head}} [\mathbf{z}_1; \ldots; \mathbf{z}_N] + \mathbf{b}$. The output is reshaped back to $\mathbb{R}^{B \times H \times C}$ and denormalized using the per-sample statistics saved during instance normalization, restoring the predictions to the original data scale.
 
 % ============================================================
 \section{Reproduction}
 % ============================================================
 
-We implemented PatchTST in PyTorch from the paper's description, building the
-patching layer, attention, and encoder from scratch. DLinear and Autoformer were
-adopted from Time-Series-Library~\cite{time_series_library}. To validate
-correctness, we trained all three models on ETTh1 (7 variables, hourly,
-17,420 time steps, standard 12/4/4 month split) using the authors' ETTh1
-configuration: $L{=}336$, $T{=}96$, $P{=}16$, $S{=}8$, $D{=}16$, $H{=}4$,
-$d_{ff}{=}128$, $M{=}3$ layers, dropout 0.3, Adam ($\text{lr}{=}10^{-4}$),
-batch size 128. We deviated from the paper's settings in two respects: seed 42
-(vs.\ 2021) and early stopping patience 10 (vs.\ 100).
+We implemented PatchTST in PyTorch based on the paper's description, cross-referencing the authors' source code~\cite{patchtst_github} where the paper was ambiguous. The core architecture---patching, multi-head attention, and encoder---was built from scratch; standard components such as the feed-forward dropout placement were adopted from the reference implementation. DLinear and Autoformer were adopted from Time-Series-Library~\cite{time_series_library}. To validate correctness, we trained all three models on ETTh1 (7 variables, hourly, 17,420 time steps, standard 12/4/4 month split) using the authors' ETTh1 configuration: $L{=}336$, $T{=}96$, $P{=}16$, $S{=}8$, $D{=}16$, $H{=}4$, $d_{ff}{=}128$, $M{=}3$ layers, dropout 0.3, Adam ($\text{lr}{=}10^{-4}$, constant for 3 epochs then $0.9\times$ decay per epoch following the reference code), batch size 128. We deviated from the paper's settings in two respects: seed 42 (vs.\ 2021) and early stopping patience 10 (vs.\ 100).
 
-During reproduction, we identified three discrepancies between the paper and its
-reference code: (1) the patching formula unconditionally pads $S$ values,
-producing a redundant patch when the sequence divides evenly---we corrected this
-as described in Section~2.4; (2) the code uses RevIN with learnable parameters
-rather than the instance normalization described in the paper---we followed the
-paper; (3) the paper text (Appendix A.1.4) reports dropout 0.2 while the
-authors' ETTh1 training script uses 0.3---we used 0.3 to match the
-configuration that produced the reported numbers.
+During reproduction, we identified four discrepancies between the paper and its reference code: (1) the patching formula unconditionally pads $S$ values, producing a redundant patch when the sequence divides evenly---we corrected this as described in Section~2.4; (2) the official implementation replaces instance normalization with RevIN, a learned normalization module---we followed the paper; (3) the paper text (Appendix A.1.4) reports dropout 0.2 while the authors' ETTh1 training script uses 0.3---we used 0.3; (4) the reference code applies dropout twice on the attention output---once after the output projection inside the attention module, and again on the residual path in the encoder layer---resulting in an effective drop rate of $1-(1-p)^2 \approx 0.51$ for $p{=}0.3$. The paper describes a single dropout per sub-block. We removed the redundant projection dropout to match the paper's description.
 
 \begin{table}[h]
 \centering
 \caption{ETTh1 reproduction validation (pred\_len = 96). Lower is better.}
 \label{tab:results}
-\begin{tabular}{lcccc}
+\begin{tabular}{lccccc}
 \toprule
-Model & MSE (Paper) & MSE (Ours) & MAE (Paper) & MAE (Ours) \\
+Model & MSE (Paper) & MSE (Ours) & MAE (Paper) & MAE (Ours) & Train Time \\
 \midrule
-PatchTST   & 0.375 & 0.381 & 0.399 & 0.403 \\
-DLinear    & 0.375 & 0.374 & 0.399 & 0.397 \\
-Autoformer & 0.435 & 0.528 & 0.446 & 0.491 \\
+PatchTST   & 0.375 & 0.381 & 0.399 & 0.403 & 196s \\
+DLinear    & 0.375 & 0.374 & 0.399 & 0.397 & 9s \\
+Autoformer & 0.435 & 0.528 & 0.446 & 0.491 & 1205s \\
 \bottomrule
 \end{tabular}
 \end{table}

@@ -4,13 +4,12 @@
 
 ### Summary
 
-| Model         | Config           | MSE (Paper) | MSE (Ours) | MAE (Paper) | MAE (Ours) |
-| ------------- | ---------------- | ----------- | ---------- | ----------- | ---------- |
-| PatchTST      | ETTh1            | 0.375       | 0.381      | 0.399       | 0.403      |
-| ACCA PatchTST | linear, pre_head | -           | 0.397      | -           | 0.415      |
-| DLinear       | default          | 0.375       | 0.374      | 0.399       | 0.397      |
-| Autoformer    | default          | 0.435       | 0.528      | 0.446       | 0.491      |
-| Autoformer    | ETTh1            | —           | 0.684      | —           | 0.556      | 11 | 146s (MPS) |
+| Model      | Config  | MSE (Paper) | MSE (Ours) | MAE (Paper) | MAE (Ours) | Best Epoch | Time        |
+| ---------- | ------- | ----------- | ---------- | ----------- | ---------- | ---------- | ----------- |
+| PatchTST   | ETTh1   | 0.375       | 0.381      | 0.399       | 0.403      | 37         | 196s (MPS)  |
+| DLinear    | default | 0.375       | 0.374      | 0.399       | 0.397      | 43         | 9s (MPS)    |
+| Autoformer | default | 0.435       | 0.528      | 0.446       | 0.491      | 6          | 1205s (MPS) |
+| Autoformer | ETTh1   | —           | 0.684      | —           | 0.556      | 11         | 146s (MPS)  |
 
 ### Experiment configs
 
