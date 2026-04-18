@@ -1,3 +1,5 @@
+import math
+
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -99,11 +101,11 @@ class TSTEncoder(nn.Module):
 
 
 class PatchEmbedding(nn.Module):
-    def __init__(self, patch_len, stride, num_patches, d_model, dropout):
+    def __init__(self, patch_len, stride, padding, num_patches, d_model, dropout):
         super().__init__()
         self.patch_len = patch_len
         self.stride = stride
-        self.padding = patch_len - stride
+        self.padding = padding
 
         self.patch_proj = nn.Linear(patch_len, d_model)
         self.W_pos = nn.Parameter(torch.empty(num_patches, d_model))
@@ -265,12 +267,13 @@ class Model(nn.Module):
         self.d_ff = configs.d_ff
         self.dropout = configs.dropout
 
-        self.padding = self.patch_len - self.stride
-        self.num_patches = ((self.seq_len - self.patch_len) // self.stride) + 2
+        self.num_patches = math.ceil((self.seq_len - self.patch_len) / self.stride) + 1
+        self.padding = self.patch_len + (self.num_patches - 1) * self.stride - self.seq_len
 
         self.patch_embedding = PatchEmbedding(
             patch_len=self.patch_len,
             stride=self.stride,
+            padding=self.padding,
             num_patches=self.num_patches,
             d_model=self.d_model,
             dropout=self.dropout,
