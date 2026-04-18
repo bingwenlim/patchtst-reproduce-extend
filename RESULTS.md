@@ -4,12 +4,14 @@
 
 ### Summary
 
-| Model      | Config  | MSE (Paper) | MSE (Ours) | MAE (Paper) | MAE (Ours) | Best Epoch | Time        |
-| ---------- | ------- | ----------- | ---------- | ----------- | ---------- | ---------- | ----------- |
-| PatchTST   | ETTh1   | 0.375       | 0.381      | 0.399       | 0.403      | 37         | 196s (MPS)  |
-| DLinear    | default | 0.375       | 0.374      | 0.399       | 0.397      | 43         | 9s (MPS)    |
-| Autoformer | default | 0.435       | 0.528      | 0.446       | 0.491      | 6          | 1205s (MPS) |
-| Autoformer | ETTh1   | —           | 0.684      | —           | 0.556      | 11         | 146s (MPS)  |
+| Model           | Config           | MSE (Paper) | MSE (Ours) | MAE (Paper) | MAE (Ours) | Best Epoch | Time        |
+| --------------- | ---------------- | ----------- | ---------- | ----------- | ---------- | ---------- | ----------- |
+| PatchTST        | ETTh1            | 0.375       | 0.381      | 0.399       | 0.403      | 37         | 196s (MPS)  |
+| PatchTST (ACCA) | ETTh1 (linear)   | —           | 0.381      | —           | 0.403      | 37         | 169s (MPS)  |
+| PatchTST (ACCA) | default (linear) | —           | 0.377      | —           | 0.399      | 3          | 225s (MPS)  |
+| DLinear         | default          | 0.375       | 0.374      | 0.399       | 0.397      | 43         | 9s (MPS)    |
+| Autoformer      | default          | 0.435       | 0.528      | 0.446       | 0.491      | 6          | 1205s (MPS) |
+| Autoformer      | ETTh1            | —           | 0.684      | —           | 0.556      | 11         | 146s (MPS)  |
 
 ### Experiment configs
 
@@ -27,6 +29,44 @@ uv run python train.py --model PatchTST --d_model 16 --n_heads 4 --d_ff 128 --dr
 Notes:
 - Paper uses seed 2021, patience 100. We use seed 42, patience 10.
 - Paper reports dropout 0.2 in text (Appendix A.1.4), but etth1.sh uses 0.3. We used 0.3.
+
+### PatchTST (ACCA)
+
+#### ETTh1 Config
+```bash
+uv run python train.py \
+  --model PatchTST \
+  --dataset ETTh1 \
+  --d_model 16 \
+  --n_heads 4 \
+  --d_ff 128 \
+  --dropout 0.3 \
+  --use_acca \
+  --acca_type linear
+```
+
+Notes:
+- Full run using ACCA with linear mapping (ETTh1 minimal config).
+- Test MSE: `0.3813`, Test MAE: `0.4031`
+- Best Epoch: `37` (Final Epoch 47)
+- ACCA `alpha_raw` mean: `-4.5674` (at epoch 47)
+- ACCA `alpha_effective` mean: `0.0103` (at epoch 47)
+
+#### Default Config
+```bash
+uv run python train.py \
+  --model PatchTST \
+  --dataset ETTh1 \
+  --use_acca \
+  --acca_type linear
+```
+
+Notes:
+- Full run using ACCA with linear mapping (larger default hyperparameters).
+- Test MSE: `0.3774`, Test MAE: `0.3993`
+- Best Epoch: `3` (Final Epoch 13)
+- ACCA `alpha_raw` mean: `-4.5767` (at epoch 13)
+- ACCA `alpha_effective` mean: `0.0102` (at epoch 13)
 
 ### DLinear
 
