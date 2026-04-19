@@ -235,7 +235,7 @@ def _get_fx_dataset(file_path, seq_len, pred_len, label_len):
 
     raw_data = df[all_cols].to_numpy(dtype=np.float32)
     
-    marks = time_features(df["Date"])
+    marks = time_features(df.index.to_series())
     # Split data (70% train, 15% val, 15% test)
     total_len = len(df)
     train_end = int(total_len * 0.7)
