@@ -68,6 +68,12 @@ def get_dataset(name, seq_len, pred_len, label_len):
             file_path="data/processed_air.csv",
             seq_len=seq_len, pred_len=pred_len, label_len=label_len,
         )
+    # Highly correlated FX dataset
+    elif name == "fx":
+        return _get_fx_dataset(
+            file_path="data/fx_cleaned.csv",
+            seq_len=seq_len, pred_len=pred_len, label_len=label_len,
+        )
     raise ValueError(f"Unknown dataset: {name}")
 
 
@@ -182,6 +188,54 @@ def _get_air_dataset(file_path, seq_len, pred_len, label_len):
     raw_data = df[all_cols].to_numpy(dtype=np.float32)
     
     marks = time_features(df["date"])
+    # Split data (70% train, 15% val, 15% test)
+    total_len = len(df)
+    train_end = int(total_len * 0.7)
+    val_end = int(total_len * 0.85)
+
+    # Adjust borders for lookback overlap
+    border1s = [0, train_end - seq_len, val_end - seq_len]
+    border2s = [train_end, val_end, total_len]
+
+    # Normalise with only the training data 
+    train_portion = raw_data[:train_end]
+    mean = train_portion.mean(axis=0, keepdims=True)
+    std = train_portion.std(axis=0, keepdims=True)
+    std[std == 0] = 1.0
+
+    scaled = (raw_data - mean) / std
+
+    enc_in = raw_data.shape[1]
+
+    # Create dataset
+    datasets = {}
+    for i, name in enumerate(["train", "val", "test"]):
+        b1, b2 = border1s[i], border2s[i]
+
+        datasets[name] = TimeSeriesDataset(
+            scaled[b1:b2],
+            seq_len,
+            pred_len,
+            label_len,
+            marks[b1:b2],
+        )
+
+    return datasets, enc_in
+
+
+def _get_fx_dataset(file_path, seq_len, pred_len, label_len):
+    df = pd.read_csv(file_path)
+    df["Date"] = pd.to_datetime(df["Date"])
+    df = df.set_index("Date")
+
+    target_col = "Singapore Dollar" 
+    numeric_cols = df.select_dtypes(include=[np.number]).columns.tolist()
+    feature_cols = [col for col in numeric_cols if col != target_col]
+    all_cols = feature_cols + [target_col]
+
+    raw_data = df[all_cols].to_numpy(dtype=np.float32)
+    
+    marks = time_features(df["Date"])
     # Split data (70% train, 15% val, 15% test)
     total_len = len(df)
     train_end = int(total_len * 0.7)
