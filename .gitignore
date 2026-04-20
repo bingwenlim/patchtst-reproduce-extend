@@ -206,3 +206,7 @@ __marimo__/
 *.pt
 *.pth
 checkpoints/
+
+# OS generated files
+.DS_Store
+.DS_Store?

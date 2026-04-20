@@ -1,17 +1,32 @@
 \relax 
 \providecommand\hyper@newdestlabel[2]{}
+\providecommand\HyperFirstAtBeginDocument{\AtBeginDocument}
+\HyperFirstAtBeginDocument{\ifx\hyper@anchor\@undefined
+\global\let\oldcontentsline\contentsline
+\gdef\contentsline#1#2#3#4{\oldcontentsline{#1}{#2}{#3}}
+\global\let\oldnewlabel\newlabel
+\gdef\newlabel#1#2{\newlabelxx{#1}#2}
+\gdef\newlabelxx#1#2#3#4#5#6{\oldnewlabel{#1}{{#2}{#3}}}
+\AtEndDocument{\ifx\hyper@anchor\@undefined
+\let\contentsline\oldcontentsline
+\let\newlabel\oldnewlabel
+\fi}
+\fi}
+\global\let\hyper@last\relax 
+\gdef\HyperFirstAtBeginDocument#1{#1}
 \providecommand\HyField@AuxAddToFields[1]{}
 \providecommand\HyField@AuxAddToCoFields[2]{}
 \citation{informer}
 \citation{autoformer}
 \citation{dlinear}
 \@writefile{toc}{\contentsline {section}{\numberline {1}Introduction}{1}{section.1}\protected@file@percent }
-\citation{patchtst_github}
+\citation{revin}
 \@writefile{toc}{\contentsline {section}{\numberline {2}PatchTST}{2}{section.2}\protected@file@percent }
 \@writefile{toc}{\contentsline {subsection}{\numberline {2.1}Overview}{2}{subsection.2.1}\protected@file@percent }
 \@writefile{toc}{\contentsline {subsection}{\numberline {2.2}Instance Normalization}{2}{subsection.2.2}\protected@file@percent }
 \@writefile{toc}{\contentsline {subsection}{\numberline {2.3}Channel Independence}{2}{subsection.2.3}\protected@file@percent }
 \@writefile{toc}{\contentsline {subsection}{\numberline {2.4}Patching}{2}{subsection.2.4}\protected@file@percent }
+\citation{vaswani2017}
 \citation{patchtst_github}
 \citation{time_series_library}
 \@writefile{toc}{\contentsline {subsection}{\numberline {2.5}Patch Embedding}{3}{subsection.2.5}\protected@file@percent }
@@ -19,17 +34,35 @@
 \@writefile{toc}{\contentsline {subsection}{\numberline {2.7}Prediction Head and Denormalization}{3}{subsection.2.7}\protected@file@percent }
 \@writefile{toc}{\contentsline {section}{\numberline {3}Reproduction}{3}{section.3}\protected@file@percent }
 \citation{patchtst}
-\bibcite{informer}{1}
-\bibcite{autoformer}{2}
+\citation{traffic_dataset}
+\citation{air_dataset}
+\citation{fx_dataset}
 \@writefile{lot}{\contentsline {table}{\numberline {1}{\ignorespaces ETTh1 reproduction validation (pred\_len = 96). Lower is better.}}{4}{table.1}\protected@file@percent }
 \newlabel{tab:results}{{1}{4}{ETTh1 reproduction validation (pred\_len = 96). Lower is better}{table.1}{}}
 \@writefile{toc}{\contentsline {section}{\numberline {4}Evaluation on Additional Datasets}{4}{section.4}\protected@file@percent }
 \newlabel{sec:evaluation}{{4}{4}{Evaluation on Additional Datasets}{section.4}{}}
-\@writefile{toc}{\contentsline {section}{\numberline {5}Extension: Cross-Channel Attention}{4}{section.5}\protected@file@percent }
-\newlabel{sec:extension}{{5}{4}{Extension: Cross-Channel Attention}{section.5}{}}
-\@writefile{toc}{\contentsline {section}{\numberline {6}Conclusion}{4}{section.6}\protected@file@percent }
-\bibcite{dlinear}{3}
-\bibcite{patchtst}{4}
-\bibcite{patchtst_github}{5}
-\bibcite{time_series_library}{6}
-\gdef \@abspage@last{5}
+\@writefile{toc}{\contentsline {subsection}{\numberline {4.1}Datasets}{4}{subsection.4.1}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {4.2}Preprocessing}{5}{subsection.4.2}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {4.3}Results}{5}{subsection.4.3}\protected@file@percent }
+\@writefile{lot}{\contentsline {table}{\numberline {2}{\ignorespaces Results on additional datasets (pred\_len = 96). Lower is better. All runs use the ETTh1 paper config. Results pending.}}{5}{table.2}\protected@file@percent }
+\newlabel{tab:additional_results}{{2}{5}{Results on additional datasets (pred\_len = 96). Lower is better. All runs use the ETTh1 paper config. Results pending}{table.2}{}}
+\@writefile{toc}{\contentsline {section}{\numberline {5}Extension: Adaptive Cross-Channel Attention}{5}{section.5}\protected@file@percent }
+\newlabel{sec:extension}{{5}{5}{Extension: Adaptive Cross-Channel Attention}{section.5}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {5.1}Motivation}{5}{subsection.5.1}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {5.2}Architecture}{6}{subsection.5.2}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {5.3}Results on ETTh1}{6}{subsection.5.3}\protected@file@percent }
+\bibcite{vaswani2017}{1}
+\bibcite{informer}{2}
+\bibcite{autoformer}{3}
+\bibcite{dlinear}{4}
+\bibcite{patchtst}{5}
+\bibcite{revin}{6}
+\@writefile{lot}{\contentsline {table}{\numberline {3}{\ignorespaces ETTh1 ACCA ablation (pred\_len = 96). Lower is better.}}{7}{table.3}\protected@file@percent }
+\newlabel{tab:acca_results}{{3}{7}{ETTh1 ACCA ablation (pred\_len = 96). Lower is better}{table.3}{}}
+\@writefile{toc}{\contentsline {section}{\numberline {6}Conclusion}{7}{section.6}\protected@file@percent }
+\bibcite{patchtst_github}{7}
+\bibcite{time_series_library}{8}
+\bibcite{traffic_dataset}{9}
+\bibcite{air_dataset}{10}
+\bibcite{fx_dataset}{11}
+\gdef \@abspage@last{8}

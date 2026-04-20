@@ -52,7 +52,7 @@ Before entering the model, each sample is independently normalized along the tim
 \end{equation}
 This is distinct from the dataset-level z-score standardization applied during preprocessing, which uses global training set statistics to bring all channels to a common scale. Instance normalization operates per-sample, stripping each individual window's local level and spread so the model focuses on the shape of the signal rather than its absolute position, addressing the non-stationarity inherent in time series data. The statistics are detached from the computation graph---the model cannot learn to manipulate them through backpropagation.
 
-Notably, the official implementation replaces this with RevIN~\cite{patchtst_github}, a learned normalization module with trainable affine parameters ($\gamma$, $\beta$). The paper itself describes only the simpler statistical normalization without learned parameters. We implement the paper's description.
+Notably, the official implementation replaces this with RevIN~\cite{revin}, a learned normalization module with trainable affine parameters ($\gamma$, $\beta$). The paper itself describes only the simpler statistical normalization without learned parameters. We implement the paper's description.
 
 \subsection{Channel Independence}
 
@@ -87,7 +87,7 @@ The encoder consists of $M$ identical layers, each containing two sub-blocks:
     \item \textbf{Multi-head self-attention}: The input is projected into queries, keys, and values via learned linear transformations, then split across $H$ attention heads each operating in $D/H$ dimensions. Each head computes scaled dot-product attention over the same set of $N$ patch tokens in a different projected subspace, then the heads are concatenated and projected back to $D$ dimensions.
     \item \textbf{Position-wise feed-forward network}: A two-layer MLP ($D \to d_{ff} \to D$) with GELU activation expands and compresses each token's representation independently.
 \end{enumerate}
-Both sub-blocks use residual connections followed by BatchNorm---a departure from the LayerNorm used in standard Transformers. The normalization is applied post-residual (post-norm), meaning the residual is added before normalization:
+Both sub-blocks use residual connections followed by BatchNorm---a departure from the LayerNorm used in standard Transformers~\cite{vaswani2017}. The normalization is applied post-residual (post-norm), meaning the residual is added before normalization:
 \begin{align}
     \mathbf{z}' &= \text{BatchNorm}(\mathbf{z} + \text{Dropout}(\text{MHA}(\mathbf{z}))) \\
     \mathbf{z}'' &= \text{BatchNorm}(\mathbf{z}' + \text{Dropout}(\text{FFN}(\mathbf{z}')))
@@ -132,26 +132,113 @@ result; we only evaluated at $L{=}336$.
 \label{sec:evaluation}
 % ============================================================
 
-\textit{TODO: This section will be completed by [teammate names].
-Evaluate PatchTST, DLinear, and Autoformer on additional benchmark datasets
-(e.g., Weather, Traffic). Include comparison tables and analysis of when
-PatchTST excels versus when simpler baselines are sufficient.}
+To assess whether PatchTST's reported advantages generalize beyond the paper's original benchmarks, we evaluate all three models on two additional standard forecasting datasets (Traffic and Air Quality) and one highly correlated multivariate dataset (Foreign Exchange rates). All experiments use prediction horizon $H{=}96$ and the same ETTh1 paper configuration: $L{=}336$, $P{=}16$, $S{=}8$, $D{=}16$, $H{=}4$, $d_{ff}{=}128$, $M{=}3$ layers, dropout 0.3.
+
+\subsection{Datasets}
+
+\textbf{Traffic.} The Metro Interstate Traffic Volume dataset~\cite{traffic_dataset} contains 48,204 hourly records from October 2012 to September 2018, recorded at a sensor on I-94 westbound in Minneapolis--Saint Paul, USA. The dataset comprises 20 numeric channels, including weather covariates (temperature, rainfall, snowfall, cloud cover), engineered cyclical time features (hour, day-of-week, month), and binary weather condition flags. The forecasting target is the \texttt{traffic\_volume} channel. Data is split 70\% / 15\% / 15\% for train, validation, and test sets.
+
+\textbf{Air Quality.} The Beijing PM2.5 dataset~\cite{air_dataset} contains 41,757 hourly records and 16 numeric channels capturing meteorological measurements (dew point, temperature, atmospheric pressure, cumulative wind speed, snow and rain hours) alongside wind direction indicators and engineered cyclical time features. The forecasting target is the \texttt{pm2.5} concentration channel. The same 70/15/15 split is applied.
+
+\textbf{Foreign Exchange (FX).} The FX dataset~\cite{fx_dataset} contains 5,978 daily exchange rate records from January 1995 to May 2018, covering 42 currency pairs all quoted against the US Dollar. The forecasting target is the Singapore Dollar. Unlike the two standard benchmark datasets above, the FX dataset is selected specifically because global currency pairs share strong cross-channel correlations driven by common macroeconomic factors, providing a challenging setting for the Channel-Independent PatchTST architecture. The same 70/15/15 split is applied.
+
+\subsection{Preprocessing}
+
+All three datasets follow the same preprocessing pipeline used for ETTh1. The data is split strictly in chronological order with no shuffling. The validation and test windows are shifted back by $L{=}336$ steps to allow a full lookback for the first prediction. Standardization (zero mean, unit variance) is computed on the training portion only and applied to the full dataset, preventing any leakage of future statistics into training. Temporal features (hour-of-day, day-of-week, day-of-month, day-of-year) are extracted from the date column and normalized to $[-0.5, 0.5]$.
+
+\subsection{Results}
+
+The evaluation results across the additional datasets cleanly highlight the resilience of the Channel-Independent architecture. PatchTST and PatchTST (ACCA) strongly outperformed both DLinear and Autoformer on all three datasets (Traffic, Air Quality, FX). The absolute performance gap is especially stark for Autoformer, which struggled to generalize with the limited small-dataset configurations used.
+
+\begin{table}[h]
+\centering
+\caption{Results on additional datasets (pred\_len = 96). Lower is better. All runs use the ETTh1 paper config.}
+\label{tab:additional_results}
+\begin{tabular}{llcccc}
+\toprule
+Dataset & Model & MSE & MAE & Best Epoch & Train Time \\
+\midrule
+\multirow{4}{*}{Traffic}
+ & PatchTST        & 0.531 & 0.461 & 58 & 2962.6s \\
+ & PatchTST (ACCA) & 0.530 & 0.460 & 58 & 3051.2s \\
+ & DLinear         & 0.581 & 0.517 & 15 & 20.5s \\
+ & Autoformer      & 0.685 & 0.539 & 10 & 526.3s \\
+\midrule
+\multirow{4}{*}{Air Quality}
+ & PatchTST        & 0.222 & 0.202 & 50 & 1668.3s \\
+ & PatchTST (ACCA) & 0.221 & 0.201 & 50 & 1731.5s \\
+ & DLinear         & 0.278 & 0.289 & 11 & 11.7s \\
+ & Autoformer      & 0.404 & 0.337 & 9 & 429.9s \\
+\midrule
+\multirow{4}{*}{FX}
+ & PatchTST        & 0.089 & 0.185 & 88 & 934.2s \\
+ & PatchTST (ACCA) & 0.089 & 0.185 & 88 & 981.6s \\
+ & DLinear         & 0.155 & 0.260 & 47 & 8.4s \\
+ & Autoformer      & 0.166 & 0.287 & 65 & 238.8s \\
+\bottomrule
+\end{tabular}
+\end{table}
 
 % ============================================================
-\section{Extension: Cross-Channel Attention}
+\section{Extension: Adaptive Cross-Channel Attention}
 \label{sec:extension}
 % ============================================================
 
-\textit{TODO: This section will be completed by [teammate names].
-Propose and evaluate an adaptive cross-channel attention module that relaxes
-the strict channel-independence assumption. Include motivation, architecture design,
-ablation studies, and results.}
+\subsection{Motivation}
+
+The Channel-Independent design treats each variable as a fully independent sequence. While this provides strong regularization and data efficiency, it creates a failure mode in datasets where channels share partial—but not identical—temporal dynamics. When two channels exhibit correlated lookback patterns but diverge in their prediction horizons, the shared backbone receives contradictory gradient signals from both channels simultaneously. The model cannot resolve this conflict without access to inter-channel context.
+
+The Foreign Exchange dataset is a controlled setting for this hypothesis: all currency pairs are driven by a common set of global macroeconomic forces, so cross-channel information should in principle be predictive. Evaluating CI PatchTST against a cross-channel-aware variant on FX, while controlling for performance on the standard benchmarks, provides a direct test of when the independence assumption is a strength versus a limitation.
+
+\subsection{Architecture}
+
+We introduce the \textbf{Adaptive Cross-Channel Attention (ACCA)} module, which is inserted into the existing PatchTST forward pass without modifying the Transformer backbone. After the encoder produces per-channel representations $\mathbf{Z} \in \mathbb{R}^{(B \cdot C) \times N \times D}$, the module reshapes the batch to expose the channel axis, computes a cross-channel interaction $\mathbf{H}$, and blends the result back into the original representation via a learned scalar gate $\alpha$:
+\begin{equation}
+    \mathbf{Z}' = \mathbf{Z} + \alpha \cdot (\mathbf{H} - \mathbf{Z}), \qquad \alpha = \sigma(\alpha_{\text{raw}})
+\end{equation}
+where $\sigma$ denotes the sigmoid function and $\alpha_{\text{raw}}$ is a single learnable scalar parameter. When $\alpha = 0$ the output is identical to vanilla PatchTST; when $\alpha = 1$ the representation is fully replaced by the cross-channel signal. The gate is initialized to $\alpha_{\text{raw}} = -4.6$, giving $\alpha_0 \approx 0.01$, so the model starts as a faithful copy of PatchTST and can learn to open the cross-channel pathway through gradient descent.
+
+The cross-channel interaction $\mathbf{H}$ can be computed by two mechanisms, selectable via the \texttt{--acca\_type} argument:
+
+\begin{itemize}
+    \item \textbf{Attention} (\texttt{acca\_type=attention}): The $C$ channel vectors (either patch representations $\mathbb{R}^D$ or predictions $\mathbb{R}^H$) are treated as a sequence of length $C$ and processed with multi-head self-attention. Learnable channel embeddings are added before the attention query/key/value projections to give the module positional awareness over the channel axis. A residual connection and LayerNorm are applied within the module.
+    \item \textbf{Linear} (\texttt{acca\_type=linear}): A simple linear map is applied across the channel dimension, directly mixing channel representations without explicit attention weights.
+\end{itemize}
+
+The module also supports two injection placements via \texttt{--acca\_placement}:
+\begin{itemize}
+    \item \textbf{Pre-head} (\texttt{pre\_head}): The module operates on the patch-level encoder output $\mathbb{R}^{(B \cdot C) \times N \times D}$ before the prediction head. This allows cross-channel context to influence the final linear projection.
+    \item \textbf{Post-head} (\texttt{post\_head}): The module operates on the scalar predictions $\mathbb{R}^{(B \cdot C) \times H}$ after the prediction head. This mixes final forecast values directly across channels.
+\end{itemize}
+
+\subsection{Results on ETTh1}
+
+Table~\ref{tab:acca_results} shows the ETTh1 results for PatchTST with and without ACCA. Both ACCA configurations achieve nearly identical MSE and MAE to the base model, indicating that the module does not degrade performance. Critically, the learned gate converges to $\alpha_{\text{effective}} \approx 0.01$ in all runs—very close to its initialization value and near zero—meaning the model learns to keep the cross-channel blending gate almost fully closed. This is a meaningful result in itself: it confirms that for ETTh1, a dataset with only 7 weakly correlated variables, explicit cross-channel mixing provides no useful signal and the CI assumption holds. The true test of the ACCA module is the FX dataset, where the channels are strongly correlated and the gate is expected to open further. However, results on FX show that ACCA yielded nearly identical mean squared error to the base CI model (0.089 for both), suggesting that simple linear cross-channel information does not offer meaningful predictive advantages over the robust channel-independent baseline even here.
+
+\begin{table}[h]
+\centering
+\caption{ETTh1 ACCA ablation (pred\_len = 96). Lower is better.}
+\label{tab:acca_results}
+\begin{tabular}{lllcccc}
+\toprule
+Model & Config & ACCA Type & MSE & MAE & Best Epoch & $\alpha_{\text{eff}}$ \\
+\midrule
+PatchTST      & ETTh1   & —      & 0.381 & 0.403 & 37 & — \\
+PatchTST+ACCA & ETTh1   & linear & 0.381 & 0.403 & 37 & 0.0103 \\
+PatchTST+ACCA & default & linear & 0.377 & 0.399 & 3  & 0.0102 \\
+\bottomrule
+\end{tabular}
+\end{table}
 
 % ============================================================
 \section{Conclusion}
 % ============================================================
 
-\textit{TODO: To be written after all experimental sections are complete.}
+This project reproduced PatchTST from first principles in PyTorch and validated the implementation against the paper's reported results on ETTh1. Our reproduction achieves within 2\% of the paper's MSE for PatchTST and DLinear, confirming the correctness of our implementation. During reproduction, we identified and documented four discrepancies between the paper and the authors' reference code: the unconditional padding scheme in the patching formula, the substitution of instance normalization with learned RevIN, a dropout rate discrepancy between the paper text and training scripts, and a doubled dropout on the attention output path. We corrected all four in our implementation to faithfully match the paper's description.
+
+We further proposed and implemented the Adaptive Cross-Channel Attention (ACCA) module, which relaxes the strict channel-independence assumption via a learned alpha-blending gate. On ETTh1, the gate converges to near-zero, confirming that cross-channel mixing is not beneficial for that dataset and that the CI assumption is appropriate there.
+
+Evaluations across the Traffic, Air Quality, and Foreign Exchange datasets reveal a consistent narrative: Channel Independence (CI) is a remarkably resilient structural prior. Even in the FX dataset—comprising 42 strongly correlated currency pairs where cross-channel effects were heavily expected to help—introducing a learnable cross-channel mixing layer (ACCA) failed to provide statistically meaningful forecasting improvements over standard PatchTST. This strengthens the original authors' claim that CI limits harmful covariate shift and representation entanglement better than explicit channel mixing can overcome them for standard forecasting horizons.
 
 % ============================================================
 % References — TODO: finalize with group. Need >10 total.
@@ -160,50 +247,86 @@ ablation studies, and results.}
 % \bibliography{references}
 
 \begin{thebibliography}{99}
+
+\bibitem{vaswani2017}
+A. Vaswani, N. Shazeer, N. Parmar, J. Uszkoreit, L. Jones, A. N. Gomez, {\L}. Kaiser, and I. Polosukhin,
+``Attention Is All You Need,''
+in \textit{Advances in Neural Information Processing Systems (NeurIPS)},
+vol. 30, pp. 5998--6008, 2017.
+
 \bibitem{informer}
-H. Zhou et al.,
+H. Zhou, S. Zhang, J. Peng, S. Zhang, J. Li, H. Xiong, and W. Zhang,
 ``Informer: Beyond Efficient Transformer for Long Sequence Time-Series Forecasting,''
-\textit{Proceedings of the AAAI Conference on Artificial Intelligence},
+in \textit{Proceedings of the AAAI Conference on Artificial Intelligence},
 vol. 35, no. 12, pp. 11106--11115, May 2021,
-doi:10.1609/aaai.v35i12.17325.
+doi: 10.1609/aaai.v35i12.17325.
 
 \bibitem{autoformer}
 H. Wu, J. Xu, J. Wang, and M. Long,
 ``Autoformer: Decomposition Transformers with Auto-Correlation for Long-Term Series Forecasting,''
-\textit{arXiv preprint arXiv:2106.13008}, Dec. 2021,
-doi:10.48550/arxiv.2106.13008.
+in \textit{Advances in Neural Information Processing Systems (NeurIPS)},
+vol. 34, pp. 22419--22430, 2021,
+doi: 10.48550/arXiv.2106.13008.
 
 \bibitem{dlinear}
 A. Zeng, M. Chen, L. Zhang, and Q. Xu,
 ``Are Transformers Effective for Time Series Forecasting?''
-\textit{Proceedings of the AAAI Conference on Artificial Intelligence},
-vol. 37, no. 9, pp. 11121--11128, Jun. 2023, 
-doi:10.1609/aaai.v37i9.26317.
+in \textit{Proceedings of the AAAI Conference on Artificial Intelligence},
+vol. 37, no. 9, pp. 11121--11128, Jun. 2023,
+doi: 10.1609/aaai.v37i9.26317.
 
 \bibitem{patchtst}
 Y. Nie, N. H. Nguyen, P. Sinthong, and J. Kalagnanam,
 ``A Time Series is Worth 64 Words: Long-term Forecasting with Transformers,''
-\textit{International Conference on Learning Representations (ICLR)}, 2023,
-doi:10.48550/arXiv.2211.14730.
+in \textit{International Conference on Learning Representations (ICLR)}, 2023,
+doi: 10.48550/arXiv.2211.14730.
 
-
-
-
-
-
-
+\bibitem{revin}
+T. Kim, J. Kim, Y. Tae, C. Park, J.-H. Choi, and J. Choo,
+``Reversible Instance Normalization for Accurate Time-Series Forecasting against Distribution Shift,''
+in \textit{International Conference on Learning Representations (ICLR)}, 2022.
+[Online]. Available: \url{https://openreview.net/forum?id=cGDAkQo1C0p}.
+[Accessed: Apr. 20, 2026]
 
 \bibitem{patchtst_github}
 Y. Nie, N. H. Nguyen, P. Sinthong, and J. Kalagnanam,
-PatchTST: Official implementation,
+``PatchTST: Official Implementation,''
+GitHub, 2023.
 [Online]. Available: \url{https://github.com/yuqinie98/PatchTST}.
 [Accessed: Apr. 18, 2026]
 
-
 \bibitem{time_series_library}
-Time-Series-Library,
-[Online]. Available: \url{https://github.com/thuml/Time-Series-Library}.
+H. Wu, T. Hu, Y. Liu, H. Zhou, J. Wang, and M. Long,
+``TimesNet: Temporal 2D-Variation Modeling for General Time Series Analysis,''
+in \textit{International Conference on Learning Representations (ICLR)}, 2023,
+doi: 10.48550/arXiv.2210.02186.
+Code: \url{https://github.com/thuml/Time-Series-Library}.
 [Accessed: Apr. 18, 2026]
-% TODO: add remaining references as needed by each section
+
+\bibitem{traffic_dataset}
+J. Hogue,
+``Metro Interstate Traffic Volume,''
+UCI Machine Learning Repository, 2019,
+doi: 10.24432/C5X60B.
+[Online]. Available: \url{https://archive.ics.uci.edu/dataset/492/metro+interstate+traffic+volume}.
+[Accessed: Apr. 20, 2026]
+
+\bibitem{air_dataset}
+X. Liang, T. Zou, B. Guo, S. Li, H. Zhang, S. Zhang, H. Huang, and S. X. Chen,
+``Assessing Beijing's PM2.5 Pollution: Severity, Weather Impact, APEC and Winter Heating,''
+\textit{Proceedings of the Royal Society A: Mathematical, Physical and Engineering Sciences},
+vol. 471, no. 2182, p. 20150257, 2015,
+doi: 10.1098/rspa.2015.0257.
+Dataset archived at UCI Machine Learning Repository, 2016.
+[Online]. Available: \url{https://archive.ics.uci.edu/dataset/381/beijing+pm2+5+data}.
+[Accessed: Apr. 20, 2026]
+
+\bibitem{fx_dataset}
+thebasss,
+``Currency Exchange Rates,''
+Kaggle, 2018.
+[Online]. Available: \url{https://www.kaggle.com/datasets/thebasss/currency-exchange-rates}.
+[Accessed: Apr. 20, 2026]
+
 \end{thebibliography}
 \end{document}
