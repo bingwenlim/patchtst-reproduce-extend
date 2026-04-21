@@ -132,10 +132,171 @@ result; we only evaluated at $L{=}336$.
 \label{sec:evaluation}
 % ============================================================
 
-\textit{TODO: This section will be completed by [teammate names].
-Evaluate PatchTST, DLinear, and Autoformer on additional benchmark datasets
-(e.g., Weather, Traffic). Include comparison tables and analysis of when
-PatchTST excels versus when simpler baselines are sufficient.}
+To evaluate the generalization capability of PatchTST beyond the ETTh1 benchmark, we conducted experiments on additional datasets with diverse statistical properties. In particular, we focused on datasets with strong cross-channel dependencies and weak temporal regularity, which present a challenging setting for models that rely on local temporal patterns and channel-independent representations.
+
+\bigskip
+
+\noindent Specifically, we consider three datasets:
+\begin{itemize}
+\item \textbf{Traffic Dataset:} [PLACEHOLDER]
+\item \textbf{Air Dataset:} [PLACEHOLDER]
+\item \textbf{Exchange Rate Dataset:} With high volatility and weak seasonality.
+\end{itemize}
+
+\subsection{Experimental Setup}
+
+\subsubsection{Sequence Construction}
+
+A sliding window approach is used to construct samples:
+\begin{itemize}
+\item Input sequence length: $L = 336$
+\item Prediction horizon: $H = 96$
+\item Label length: $48$
+\end{itemize}
+
+\noindent Each sample consists of:
+\begin{itemize}
+\item Encoder input: past 336-timesteps
+\item Decoder target: next 96-timesteps
+\end{itemize}
+
+\subsubsection{Train/Validation/Test Split}
+
+Chronological split:
+\begin{itemize}
+\item 70\% training
+\item 15\% validation
+\item 15\% test
+\end{itemize}
+
+\noindent To preserve temporal continuity, validation and test splits are shifted backward by the lookback length. This ensures that all sliding windows remain valid without losing historical context.
+
+\subsubsection{Normalization}
+
+We apply feature-wise z-score normalization using training data only:
+\begin{equation}
+    x_{\text{normalized}} = \frac{x - \mu_{\text{train}}}{\sigma_{\text{train}}}
+\end{equation}
+
+\noindent Mean and standard deviation are computed exclusively from the training set.
+Features with zero variance are stabilized by setting $\sigma_{\text{train}}$ to 1.
+This prevents data leakage and ensures fair evaluation.
+
+\subsubsection{Time Feature Encoding}
+
+Temporal features are extracted from the datetime index using:
+\begin{itemize}
+\item hour of day
+\item day of week
+\item day of month
+\item day of year
+\end{itemize}
+
+\noindent All features are normalized to $[-0.5,0.5]$.
+
+\subsubsection{Model Configuration}
+
+All models are trained under consistent settings:
+\begin{itemize}
+\item Input sequence length: 336
+\item Prediction horizon: 96
+\item Batch size: 128
+\item Optimizer: Adam
+\item Learning rate: $1 \times 10^{-4}$
+\item Learning rate schedule: constant for the first three epochs, followed by exponential decay with factor 0.9 per epoch
+\item Maximum epochs: 100
+\item Early stopping patience: 10
+\end{itemize}
+
+\bigskip
+
+\noindent PatchTST Configuration:
+\begin{itemize}
+\item Patch length: 16
+\item Stride: 8
+\item Embedding dimension: 128
+\item Attention heads: 16
+\item Encoder layers: 3
+\item Feed-forward dimension: 256
+\item Dropout: 0.2
+\end{itemize}
+
+\noindent The best model is selected based on validation MSE.
+
+\subsubsection{Baselines}
+
+We compare against:
+\begin{itemize}
+\item DLinear — a linear model with strong empirical performance in time-series forecasting
+\item Autoformer — a Transformer-based architecture with seasonal-trend decomposition
+\end{itemize}
+
+\noindent This provides a comparison across both simple and complex model classes.
+
+\subsubsection{Evaluation Metrics}
+
+We report:
+\begin{itemize}
+\item Mean Squared Error (MSE)
+\item Mean Absolute Error (MAE)
+\end{itemize}
+
+\noindent All results are computed on the test set using the best validation checkpoint.
+
+\subsection{Additional Benchmark Dataset 1: Traffic Dataset}
+
+[PLACEHOLDER]
+
+\subsection{Additional Benchmark Dataset 2: Air Dataset}
+
+[PLACEHOLDER]
+
+\subsection{Highly Correlated Dataset 1: Foreign Currency Exchange Rates}
+
+The exchange rate dataset consists of daily foreign exchange rates over 5,978-timesteps. Each variable represents the exchange rate of a currency with a total of 42 currency exchange rates.
+
+\bigskip
+
+\noindent After preprocessing, the dataset contains:
+\begin{itemize}
+\item Length: 5,978-timesteps
+\item Frequency: Daily
+\item Input features: 42 currency exchange rates
+\end{itemize}
+
+\subsubsection{Key Characteristics}
+
+\begin{itemize}
+\item High cross-variable correlation: Exchange rates are jointly influenced by global macroeconomic factors, resulting in strong co-movement across currencies.
+\item Weak periodicity: Seasonal patterns are unstable.
+\item High volatility and noise: Exhibit stochastic fluctuations driven by market dynamics.
+\item Non-stationarity: Structural changes over time (e.g., financial crises) alter statistical properties.
+\end{itemize}
+These characteristics make the dataset particularly suitable for evaluating the limitations of channel-independent modelling.
+
+\subsubsection{Performance Comparison}
+The results demonstrate a clear performance advantage of PatchTST over both baseline models.
+\begin{itemize}
+\item PatchTST achieves the lowest error across all metrics, significantly outperforming DLinear and Autoformer.
+\item Compared to DLinear, PatchTST reduces MSE by approximately 48\%, indicating the benefit of modeling non-linear temporal dependencies.
+\item Autoformer performs substantially worse, suggesting that its decomposition-based architecture is not well-suited to financial time series with weak seasonality.
+\end{itemize}
+These results demonstrate that PatchTST is highly effective even in challenging financial time series.
+
+\begin{table}[h]
+\centering
+\caption{Performance comparison on the exchange rate dataset. Lower is better.}
+\label{tab:results}
+\begin{tabular}{lcc}
+\toprule
+Model & MSE & MAE \\
+\midrule
+PatchTST   & 0.081 & 0.174 \\
+DLinear    & 0.156 & 0.260 \\
+Autoformer & 0.350 & 0.406 \\
+\bottomrule
+\end{tabular}
+\end{table}
 
 % ============================================================
 \section{Extension: Cross-Channel Attention}
