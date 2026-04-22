@@ -6,6 +6,7 @@
 \usepackage{graphicx}
 \usepackage{hyperref}
 \usepackage{geometry}
+\usepackage{float}
 \geometry{a4paper, margin=1in}
 
 \title{Reproducing and Extending PatchTST: \\
@@ -132,14 +133,14 @@ result; we only evaluated at $L{=}336$.
 \label{sec:evaluation}
 % ============================================================
 
-To evaluate the generalization capability of PatchTST beyond the ETTh1 benchmark, we conducted experiments on additional datasets with diverse statistical properties. In particular, we focused on datasets with strong cross-channel dependencies and weak temporal regularity, which present a challenging setting for models that rely on local temporal patterns and channel-independent representations.
+To evaluate the generalization capability of PatchTST beyond the ETTh1 benchmark, we conducted experiments on additional datasets with diverse statistical properties. We selected benchmark datasets with seasonal patterns analogous to, but not included in, the original paper. Furthermore, We extended to focus on dataset with strong cross-channel dependencies and weak temporal regularity, which present a challenging setting for models that rely on local temporal patterns and channel-independent representations.
 
 \bigskip
 
 \noindent Specifically, we consider three datasets:
 \begin{itemize}
-\item \textbf{Traffic Dataset:} [PLACEHOLDER]
-\item \textbf{Air Dataset:} [PLACEHOLDER]
+\item \textbf{Traffic Dataset:} With strong daily patterns and spatial dependencies.
+\item \textbf{Air Quality Dataset:} Moderate seasonality with exogenous coupling.
 \item \textbf{Exchange Rate Dataset:} With high volatility and weak seasonality.
 \end{itemize}
 
@@ -225,7 +226,7 @@ All models are trained under consistent settings:
 
 \subsubsection{Baselines}
 
-We compare against:
+We compare PatchTST against:
 \begin{itemize}
 \item DLinear — a linear model with strong empirical performance in time-series forecasting
 \item Autoformer — a Transformer-based architecture with seasonal-trend decomposition
@@ -237,19 +238,112 @@ We compare against:
 
 We report:
 \begin{itemize}
-\item Mean Squared Error (MSE)
-\item Mean Absolute Error (MAE)
+\item \textbf{Mean Squared Error (MSE):} $\frac{1}{n} \sum_{i=1}^{n} (y_i - \hat{y}_i)^2$
+
+\item \textbf{Mean Absolute Error (MAE):} $\frac{1}{n} \sum_{i=1}^{n} |y_i - \hat{y}_i|$
 \end{itemize}
 
 \noindent All results are computed on the test set using the best validation checkpoint.
 
 \subsection{Additional Benchmark Dataset 1: Traffic Dataset}
+The traffic dataset contains hourly volume measurements on westbound I-94 in Minneapolis-St. Paul (2012-2018), along with weather and holiday features \cite{data-traffic}.
 
-[PLACEHOLDER]
+\bigskip
 
-\subsection{Additional Benchmark Dataset 2: Air Dataset}
+\noindent After preprocessing, the dataset contains:
+\begin{itemize}
+\item Length: 48,204-timesteps
+\item Frequency: Hourly
+\item Input features: 20 variables (including feature engineered and one-hot encoded)
+\end{itemize}
 
-[PLACEHOLDER]
+\subsubsection{Key Characteristics}
+\begin{itemize}
+\item Rich contextual features: Includes weather conditions (temperature, precipitation, cloud cover) and holiday indicators, making it suitable for predictive modeling.
+\item Cyclical and seasonal patterns: Captures recurring annual events (holidays, seasonal weather shifts) that systematically influence traffic volume across time.
+\end{itemize}
+
+\noindent This dataset serves as a performance benchmark to verify PatchTST's results presented in the paper.
+
+\subsubsection{Performance Comparison}
+
+The results on the traffic dataset demonstrate that PatchTST consistently outperforms both baseline models, though the margins are narrow.
+
+\begin{itemize}
+\item PatchTST obtains the lowest errors on both metrics, with an MSE of 0.538 and MAE of 0.461, indicating the most accurate overall predictions.
+    
+\item Compared to DLinear, PatchTST reduces MSE more by 7.4\% and MAE by 10.8\%. 
+
+\item Autoformer performs moderately among the three models. While its decomposition mechanism helps capture trend and seasonality, it remains behind PatchTST by 4.8\% in MSE and 9.1\% in MAE, indicating less precise overall predictions.
+\end{itemize}
+
+\begin{table}[H]
+\centering
+\caption{Performance comparison on the traffic dataset. Lower is better.}
+\label{tab:traffic_results}
+\begin{tabular}{lcc}
+\toprule
+Model & MSE & MAE \\
+\midrule
+PatchTST   & 0.538 & 0.461 \\
+DLinear    & 0.581 & 0.517 \\
+Autoformer & 0.565 & 0.507 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\noindent Traffic volume's strong daily/weekly periodicity and autoregressive structure (e.g. current volume depends heavily on the previous hour) allows simpler models like DLinear to perform competitively. However, PatchTST's patch-based representation still provides an advantage by capturing fine-grained local temporal dependencies that are not fully exploited by the other models.
+
+\subsection{Additional Benchmark Dataset 2: Air Quality Dataset}
+The air quality dataset consists of hourly PM2.5 concentration measurements collected at the US Embassy in Beijing, covering the period from January 1, 2010 to December 31, 2014\cite{data-air}. To provide contextual environmental information, the dataset also includes meteorological data obtained from Beijing Capital International Airport.
+
+\bigskip
+
+\noindent After preprocessing, the dataset contains:
+\begin{itemize}
+\item Length: 43,8244-timesteps
+\item Frequency: Hourly
+\item Input features: 20 variables (including feature engineered and one-hot encoded)
+\end{itemize}
+
+\subsubsection{Key Characteristics}
+\begin{itemize}
+\item Seasonal and daily periodicity: weak but observable patterns, such as diurnal cycles and seasonal trends.
+
+\item Volatility and extreme events: contains highly fluctuating pm2.5 values, including extreme spikes and sudden pollution events or sensor anomalies.
+
+\item Non-stationarity: Statistical properties shift over time due to changing weather patterns, seasonal transitions, and potential policy interventions.
+\end{itemize}
+
+\noindent With particular emphasis on its periodic yet non-stationary dual nature, the dataset constitutes a moderately challenging benchmark to evaluate whether PatchTST can appropriately perform to capture seasonal cycles without encroaching upon incompatible temporal regimes.
+
+\subsubsection{Performance Comparison}
+The results on the air quality dataset show a more significant performance gap compared to the traffic dataset by PatchTST.
+
+\begin{itemize}
+\item PatchTST make substantially more accurate predictions as evidenced by the lowest error across both metrics, with an MSE of 0.212 and MAE of 0.190.
+
+\item Compared to DLinear, PatchTST achieves a significantly larger proportional reduction, lowering MSE by 24.0\% and MAE by 34.3\%.
+
+\item Autoformer performs similarly to DLinear but remains substantially behind PatchTST, which outperforms it by 24.3\% in MSE and 33.8\% in MAE.
+\end{itemize}
+
+\begin{table}[h]
+\centering
+\caption{Performance comparison on the traffic dataset. Lower is better.}
+\label{tab:traffic_results}
+\begin{tabular}{lcc}
+\toprule
+Model & MSE & MAE \\
+\midrule
+PatchTST   & 0.212 & 0.190 \\
+DLinear    & 0.279 & 0.289 \\
+Autoformer & 0.280 & 0.287 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\noindent With the air quality data lacking such strong periodic regularity and exhibiting more complex, non-stationary dynamics, it is harder for simpler or decomposition-based models to capture underlying patterns effectively. This setting confirms PatchTST's competencies in local pattern extraction.
 
 \subsection{Highly Correlated Dataset 1: Foreign Currency Exchange Rates}
 
@@ -347,11 +441,17 @@ Y. Nie, N. H. Nguyen, P. Sinthong, and J. Kalagnanam,
 \textit{International Conference on Learning Representations (ICLR)}, 2023,
 doi:10.48550/arXiv.2211.14730.
 
+\bibitem{data-traffic}
+J. Hogue,
+``Metro Interstate Traffic Volume,''
+UCI Machine Learning Repository, 2019,
+doi:10.24432/C5X60B.
 
-
-
-
-
+\bibitem{data-air}
+S. Chen,
+``Beijing PM2.5 [Dataset],''
+UCI Machine Learning Repository, 2015,
+doi:10.24432/C5JS49.
 
 
 \bibitem{patchtst_github}
