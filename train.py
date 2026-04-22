@@ -311,7 +311,11 @@ def run_training(
 
     save_dir = Path(save_dir)
     save_dir.mkdir(parents=True, exist_ok=True)
-    model_save_path = save_dir / f"best_{model_name.lower()}.pt"
+    # Include run_name in the checkpoint filename so parallel ablation runs
+    # don't clobber each other and we can re-load a specific trained ACCA
+    # model later (e.g. to extract attention weights for the report figures).
+    ckpt_slug = run_name if run_name else f"best_{model_name.lower()}"
+    model_save_path = save_dir / f"{ckpt_slug}.pt"
     torch.save(model.state_dict(), model_save_path)
     print(f"Best model saved to: {model_save_path}")
 
