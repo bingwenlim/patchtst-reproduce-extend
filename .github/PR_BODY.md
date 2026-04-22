@@ -2,6 +2,8 @@
 
 Closes my portion of the proposal deliverables: ACCA ablation experiments, new report figures, and the Extension / Conclusion rewrite.
 
+**Status of the branch.** This branch was forked from `origin/Run-result` (Ziming's in-flight documentation branch) because that was the latest code that had the ACCA module, the four-dataset benchmark results, and the dataset prose together. `main` has since diverged via PR #14 (dataset write-up). Please **merge Run-result into `main` first** (resolving conflicts with PR #14), then I can rebase this branch onto the new `main` and open the final PR. Attempting the rebase now produces conflicts in `report/patchtst.tex` / `report/patchtst.{aux,out,pdf}` / `.DS_Store` that are essentially Run-result vs. PR #14 and should be resolved by whoever merges Run-result.
+
 ## Summary
 
 - **`train.py`**: logs a per-epoch JSON trace (`scripts/traces/<run_name>_trace.json`) with `alpha_raw`, `alpha_effective`, `train_mse`, `val_mse`, LR and epoch time. Adds `--run_name` and `--trace_dir` CLI flags; checkpoint filename now uses `run_name` so parallel ablation runs no longer clobber each other.
