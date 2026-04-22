@@ -80,9 +80,15 @@ def plot_alpha_trace(traces, out_path):
 
 
 def _load_baseline():
-    """Load scripts/benchmark_results.json -> {dataset: {model: (mse, mae)}}."""
+    """Load scripts/benchmark_results.json -> {dataset: {model: (mse, mae)}}.
+
+    The benchmark JSON produced by Ziming's scripts/run_benchmarks.py only
+    covers traffic/air/fx; ETTh1 lives in the reproduction-validation section
+    of the report and is hard-coded here so the plot still has a reference
+    point for ETTh1 bars.
+    """
     path = REPO / "scripts" / "benchmark_results.json"
-    out = {}
+    out = {"ETTh1": {"PatchTST": (0.381, 0.403)}}
     if not path.exists():
         return out
     with path.open(encoding="utf-8") as f:
@@ -143,25 +149,26 @@ def plot_mse_delta(out_path):
     x = np.arange(len(datasets))
 
     # For each dataset we draw up to max_runs bars; deltas are (ACCA - base)/base.
+    # Labels come from the run whose configuration is most representative of
+    # the slot, chosen as the first dataset that has a run in that slot (since
+    # the matrix is built with the same ordering per dataset).
     for i in range(max_runs):
         deltas = []
-        labels = []
-        for j, ds in enumerate(datasets):
+        slot_label = None
+        for ds in datasets:
             rows = runs_by_dataset[ds]
             if i >= len(rows) or rows[i]["mse"] is None:
                 deltas.append(np.nan)
-                labels.append("")
                 continue
             base = baseline.get(ds, {}).get("PatchTST", (None, None))[0]
             if base is None:
                 deltas.append(np.nan)
-                labels.append("")
                 continue
             deltas.append(100.0 * (rows[i]["mse"] - base) / base)
-            labels.append(rows[i]["name"].replace("acca_", ""))
+            if slot_label is None:
+                slot_label = rows[i]["name"].replace("acca_", "").rsplit("_", 1)[0]
         positions = x + (i - max_runs / 2) * width + width / 2
-        ax.bar(positions, deltas, width,
-               label=labels[0] if labels else f"run{i}")
+        ax.bar(positions, deltas, width, label=slot_label or f"run{i}")
 
     ax.axhline(0.0, linewidth=0.8, color="black")
     ax.set_xticks(x)

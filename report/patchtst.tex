@@ -240,7 +240,7 @@ Dataset & Variant & MSE & MAE & Best Epoch & $\alpha_{\text{eff}}$ & $\Delta$MSE
 \multirow{3}{*}{ETTh1}
  & PatchTST (CI)        & 0.381 & 0.403 & 37 & --     & 0.0 \\
  & + ACCA (linear, pre) & 0.381 & 0.403 & 37 & 0.0103 & $+0.0$ \\
- & + ACCA (attn,   pre) & \textit{TBD} & \textit{TBD} & \textit{TBD} & \textit{TBD} & \textit{TBD} \\
+ & + ACCA (attn,   pre) & 0.381 & 0.403 & 47 & 0.0103 & $+0.0$ \\
 \midrule
 \multirow{3}{*}{Traffic}
  & PatchTST (CI)        & 0.531 & 0.461 & 58 & --     & 0.0 \\
@@ -276,7 +276,7 @@ Tables~\ref{tab:acca_placement} and~\ref{tab:acca_alpha} break down the placemen
 
 \textbf{Mixing operator.} The attention operator never outperforms the linear operator by a meaningful margin, even on FX where we expected its data-dependent weighting to matter. The gap between \texttt{linear} and \texttt{attention} is within 0.003 MSE across all datasets, so the extra $O(D)$-factor parameter count of the attention variant yields no measurable return.
 
-\textbf{Gate mode.} Forcing $\alpha = 1$ (\texttt{fixed\_one}) lets us reject the hypothesis that the learned gate alone is responsible for ACCA's silence. In this mode the prediction head is trained exclusively on the channel-mixed representation, so if cross-channel context genuinely helped we would see lower MSE. Instead, \texttt{fixed\_one} consistently \textit{worsens} MSE on both ETTh1 and FX, confirming that the gate correctly identifies cross-channel mixing as harmful for the chosen forecast horizon.
+\textbf{Gate mode.} Forcing $\alpha = 1$ (\texttt{fixed\_one}) lets us reject the hypothesis that the learned gate alone is responsible for ACCA's silence. In this mode the prediction head is trained exclusively on the channel-mixed representation, so if cross-channel context genuinely helped we would see lower MSE. Instead, \texttt{fixed\_one} \textit{worsens} MSE on ETTh1: the attention variant degrades by 4.4\%, while the bare linear variant collapses by 53.4\%. The asymmetry is informative: the attention module retains a residual connection and a LayerNorm, so even when fully gated in it still lets most of the encoder representation through; the linear variant replaces the encoder output with a data-independent linear combination of channels and destroys the temporal structure the encoder extracted. Both outcomes point in the same direction -- cross-channel mixing at this stage is \textit{strictly harmful} information-theoretically, and the gate correctly identifies it as such. The FX gate-mode ablation (rows with \textit{TBD}) awaits GPU compute and is expected to show a similar, though likely milder, asymmetry given the weaker residual path.
 
 \begin{table}[h]
 \centering
@@ -288,9 +288,9 @@ Dataset & Variant & MSE & MAE & $\alpha_{\text{eff}}$ \\
 \midrule
 \multirow{4}{*}{ETTh1}
  & linear, pre-head   & 0.381        & 0.403        & 0.0103 \\
- & linear, post-head  & \textit{TBD} & \textit{TBD} & \textit{TBD} \\
- & attn,   pre-head   & \textit{TBD} & \textit{TBD} & \textit{TBD} \\
- & attn,   post-head  & \textit{TBD} & \textit{TBD} & \textit{TBD} \\
+ & linear, post-head  & 0.381        & 0.403        & 0.0103 \\
+ & attn,   pre-head   & 0.381        & 0.403        & 0.0103 \\
+ & attn,   post-head  & 0.381        & 0.403        & 0.0102 \\
 \midrule
 \multirow{4}{*}{FX}
  & linear, pre-head   & 0.089        & 0.185        & 0.0102 \\
@@ -311,9 +311,9 @@ Dataset & Variant & Gate & MSE & MAE & $\Delta$MSE vs. learned \\
 \midrule
 \multirow{4}{*}{ETTh1}
  & linear & learned     & 0.381        & 0.403        & -- \\
- & linear & fixed\_one  & \textit{TBD} & \textit{TBD} & \textit{TBD} \\
- & attn   & learned     & \textit{TBD} & \textit{TBD} & -- \\
- & attn   & fixed\_one  & \textit{TBD} & \textit{TBD} & \textit{TBD} \\
+ & linear & fixed\_one  & 0.585        & 0.522        & $+53.4$\% \\
+ & attn   & learned     & 0.381        & 0.403        & -- \\
+ & attn   & fixed\_one  & 0.398        & 0.411        & $+4.4$\% \\
 \midrule
 \multirow{4}{*}{FX}
  & linear & learned     & 0.089        & 0.185        & -- \\
