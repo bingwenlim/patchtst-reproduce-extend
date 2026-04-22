@@ -207,6 +207,9 @@ __marimo__/
 *.pth
 checkpoints/
 
+# Running ablation log (regenerated on each run)
+scripts/ablation_*.log
+
 # OS generated files
 .DS_Store
 .DS_Store?
