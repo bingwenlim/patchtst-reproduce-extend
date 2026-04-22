@@ -153,7 +153,7 @@ class AdaptiveCrossChannelAttention(nn.Module):
 
         if acca_type == 'attention':
             self.n_heads = min(n_heads, max(1, c_in // 2))
-            
+
             # Ensure d_model is divisible by n_heads
             self.internal_dim = self.d_model
             if self.d_model % self.n_heads != 0:
@@ -163,7 +163,7 @@ class AdaptiveCrossChannelAttention(nn.Module):
             else:
                 self.in_proj = nn.Identity()
                 self.out_proj = nn.Identity()
-            
+
             self.mha = nn.MultiheadAttention(embed_dim=self.internal_dim, num_heads=self.n_heads, dropout=dropout, batch_first=True)
             self.norm = nn.LayerNorm(self.internal_dim)
             self.dropout = nn.Dropout(dropout)
@@ -171,6 +171,11 @@ class AdaptiveCrossChannelAttention(nn.Module):
             self.linear = nn.Linear(c_in, c_in)
         else:
             raise ValueError(f"Unknown acca_type: {acca_type}")
+
+        # Optional cache for the last attention weights (averaged over heads),
+        # populated during eval when enabled via `record_attn`. Kept on CPU.
+        self.record_attn = False
+        self.last_attn_weights = None
 
     @property
     def alpha_raw(self):
@@ -194,30 +199,44 @@ class AdaptiveCrossChannelAttention(nn.Module):
             if self.acca_type == 'attention':
                 x_transposed_with_emb = x_transposed + self.channel_embeddings
                 x_proj = self.in_proj(x_transposed_with_emb)
-                attn_out, _ = self.mha(x_proj, x_proj, x_proj)
+                need_w = self.record_attn and not self.training
+                attn_out, attn_w = self.mha(
+                    x_proj, x_proj, x_proj,
+                    need_weights=need_w, average_attn_weights=True,
+                )
+                if need_w and attn_w is not None:
+                    # attn_w: [B*P, C, C] -> average over the B*P axis for a stable heatmap.
+                    self.last_attn_weights = attn_w.detach().mean(dim=0).cpu()
                 h = self.out_proj(self.norm(x_proj + self.dropout(attn_out)))
             else: # linear
                 h = self.linear(x_transposed.transpose(1, 2)).transpose(1, 2)
-                
+
             out_transposed = x_transposed + alpha * (h - x_transposed)
             # Back to [B*C, P, D]
             out = out_transposed.reshape(b, p, c, d).permute(0, 2, 1, 3).reshape(bc, p, d)
             return out
-            
+
         elif self.acca_placement == 'post_head':
             # x is [B*C, pred_len]
             bc, l = x.shape
-            
+
             x_t = x.reshape(b, c, l)
-            
+
             if self.acca_type == 'attention':
                 x_t_with_emb = x_t + self.channel_embeddings
                 x_proj = self.in_proj(x_t_with_emb)
-                attn_out, _ = self.mha(x_proj, x_proj, x_proj)
+                need_w = self.record_attn and not self.training
+                attn_out, attn_w = self.mha(
+                    x_proj, x_proj, x_proj,
+                    need_weights=need_w, average_attn_weights=True,
+                )
+                if need_w and attn_w is not None:
+                    # attn_w: [B, C, C] -> average over the batch axis.
+                    self.last_attn_weights = attn_w.detach().mean(dim=0).cpu()
                 h = self.out_proj(self.norm(x_proj + self.dropout(attn_out)))
             else:
                 h = self.linear(x_t.transpose(1, 2)).transpose(1, 2)
-                
+
             out = x_t + alpha * (h - x_t)
             return out.reshape(bc, l)
 

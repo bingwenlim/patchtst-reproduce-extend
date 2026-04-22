@@ -1,5 +1,6 @@
 import argparse
 import copy
+import json
 import random
 import time
 from pathlib import Path
@@ -147,6 +148,8 @@ def run_training(
     acca_n_heads=16,
     alpha_init=-4.6,
     freeze_backbone_epochs=0,
+    run_name=None,
+    trace_dir="scripts/traces",
 ):
     set_seed(seed)
 
@@ -230,6 +233,9 @@ def run_training(
 
     total_train_start = time.time()
 
+    # Per-epoch trace: captures alpha + losses; written to trace_dir/{run_name}_trace.json at the end.
+    epoch_trace = []
+
     for epoch in range(epochs):
         # 2-stage training: freeze/unfreeze backbone
         if configs.freeze_backbone_epochs > 0:
@@ -261,14 +267,29 @@ def run_training(
         )
         
         # ACCA logging
+        alpha_raw_mean = None
+        alpha_effective_mean = None
         if configs.use_acca and hasattr(model, 'acca'):
             raw = model.acca._alpha_raw.detach().cpu().numpy().flatten()
             eff = torch.sigmoid(model.acca._alpha_raw).detach().cpu().numpy().flatten()
-            print(f"Epoch {epoch + 1} | ACCA alpha_raw (mean: {raw.mean():.4f}): {raw}")
-            print(f"Epoch {epoch + 1} | ACCA alpha_effective (mean: {eff.mean():.4f}): {eff}")
-            
+            alpha_raw_mean = float(raw.mean())
+            alpha_effective_mean = float(eff.mean())
+            print(f"Epoch {epoch + 1} | ACCA alpha_raw (mean: {alpha_raw_mean:.4f}): {raw}")
+            print(f"Epoch {epoch + 1} | ACCA alpha_effective (mean: {alpha_effective_mean:.4f}): {eff}")
+
             if epoch == 0:
                 print(f"Epoch 1 Quick Check | ACCA alpha_raw.grad is hooked up: {model.acca._alpha_raw.grad is not None}")
+
+        epoch_trace.append({
+            "epoch": epoch + 1,
+            "train_mse": float(train_mse),
+            "val_mse": float(val_mse),
+            "val_mae": float(val_mae),
+            "lr": float(current_lr),
+            "epoch_time_s": float(epoch_time),
+            "alpha_raw": alpha_raw_mean,
+            "alpha_effective": alpha_effective_mean,
+        })
 
         if val_mse < best_val_mse:
             best_val_mse = val_mse
@@ -298,6 +319,16 @@ def run_training(
     test_mse, test_mae = evaluate(model, test_loader, configs, device, model_name)
     test_inference_time = time.time() - test_start
 
+    final_alpha_raw = None
+    final_alpha_effective = None
+    if configs.use_acca and hasattr(model, 'acca'):
+        final_alpha_raw = float(
+            model.acca._alpha_raw.detach().cpu().numpy().flatten().mean()
+        )
+        final_alpha_effective = float(
+            torch.sigmoid(model.acca._alpha_raw).detach().cpu().numpy().flatten().mean()
+        )
+
     results = {
         "model": model_name,
         "dataset": dataset_name,
@@ -308,6 +339,8 @@ def run_training(
         "test_mae": test_mae,
         "total_training_time": total_train_time,
         "test_inference_time": test_inference_time,
+        "final_alpha_raw": final_alpha_raw,
+        "final_alpha_effective": final_alpha_effective,
     }
 
     print()
@@ -317,6 +350,39 @@ def run_training(
             print(f"{key}: {value:.4f}")
         else:
             print(f"{key}: {value}")
+
+    if run_name:
+        trace_path = Path(trace_dir)
+        trace_path.mkdir(parents=True, exist_ok=True)
+        trace_file = trace_path / f"{run_name}_trace.json"
+        with trace_file.open("w", encoding="utf-8") as f:
+            json.dump(
+                {
+                    "run_name": run_name,
+                    "config": {
+                        "model": model_name,
+                        "dataset": dataset_name,
+                        "seq_len": seq_len,
+                        "pred_len": pred_len,
+                        "d_model": d_model,
+                        "n_heads": n_heads,
+                        "e_layers": e_layers,
+                        "d_ff": d_ff,
+                        "dropout": dropout,
+                        "use_acca": use_acca,
+                        "acca_type": acca_type,
+                        "acca_placement": acca_placement,
+                        "alpha_mode": alpha_mode,
+                        "alpha_init": alpha_init,
+                        "seed": seed,
+                    },
+                    "summary": results,
+                    "per_epoch": epoch_trace,
+                },
+                f,
+                indent=2,
+            )
+        print(f"Trace saved to: {trace_file}")
 
     return results
 
@@ -352,7 +418,12 @@ def parse_args():
     parser.add_argument("--acca_n_heads", type=int, default=16)
     parser.add_argument("--alpha_init", type=float, default=-4.6)
     parser.add_argument("--freeze_backbone_epochs", type=int, default=0)
-    
+
+    # Run bookkeeping: if set, a per-epoch JSON trace is written to {trace_dir}/{run_name}_trace.json.
+    parser.add_argument("--run_name", type=str, default=None,
+                        help="Identifier for this run; used to name the trace file.")
+    parser.add_argument("--trace_dir", type=str, default="scripts/traces")
+
     return parser.parse_args()
 
 
@@ -385,4 +456,6 @@ if __name__ == "__main__":
         acca_n_heads=args.acca_n_heads,
         alpha_init=args.alpha_init,
         freeze_backbone_epochs=args.freeze_backbone_epochs,
+        run_name=args.run_name,
+        trace_dir=args.trace_dir,
     )
