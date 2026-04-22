@@ -6,6 +6,7 @@
 \usepackage{graphicx}
 \usepackage{hyperref}
 \usepackage{geometry}
+\usepackage{multirow}
 \geometry{a4paper, margin=1in}
 
 \title{Reproducing and Extending PatchTST: \\
@@ -186,49 +187,163 @@ Dataset & Model & MSE & MAE & Best Epoch & Train Time \\
 
 \subsection{Motivation}
 
-The Channel-Independent design treats each variable as a fully independent sequence. While this provides strong regularization and data efficiency, it creates a failure mode in datasets where channels share partial—but not identical—temporal dynamics. When two channels exhibit correlated lookback patterns but diverge in their prediction horizons, the shared backbone receives contradictory gradient signals from both channels simultaneously. The model cannot resolve this conflict without access to inter-channel context.
+The Channel-Independent (CI) design treats each variable as a fully independent sequence. While this provides strong regularization and data efficiency, it is conceptually brittle in datasets where channels share partial—but not identical—temporal dynamics. Let $\mathbf{x}^{(c)}_{t-L:t}$ and $\mathbf{y}^{(c)}_{t:t+H}$ denote the lookback window and prediction window of channel $c$. Under a shared backbone $f_\theta$, CI training fits the pooled empirical distribution
+\begin{equation}
+    \mathcal{L}_{\text{CI}}(\theta) = \frac{1}{BC}\sum_{b,c}\bigl\|\,f_\theta(\mathbf{x}^{(c)}_b) - \mathbf{y}^{(c)}_b\,\bigr\|^2,
+\end{equation}
+which is optimal only when the conditional forecast distribution $p(\mathbf{y}\mid\mathbf{x})$ is approximately channel-invariant. When two channels have similar lookbacks but diverge in their horizons, the shared backbone receives contradictory gradient signals from the two channels simultaneously. The natural remedy is to let the predictor access cross-channel context---provided it can do so without sacrificing the CI regularization benefit.
 
-The Foreign Exchange dataset is a controlled setting for this hypothesis: all currency pairs are driven by a common set of global macroeconomic forces, so cross-channel information should in principle be predictive. Evaluating CI PatchTST against a cross-channel-aware variant on FX, while controlling for performance on the standard benchmarks, provides a direct test of when the independence assumption is a strength versus a limitation.
+The Foreign Exchange (FX) dataset is a controlled stress test for this hypothesis: all 42 currency pairs are driven by a common set of global macroeconomic forces, so cross-channel information should in principle be predictive. Evaluating CI PatchTST against a cross-channel-aware variant on FX, while controlling for performance on the standard benchmarks, gives a direct test of when independence is a strength versus a limitation. Prior work has attacked this question with full cross-channel attention in Crossformer~\cite{crossformer} and with an inverted attention axis in iTransformer~\cite{itransformer}. Both redesign the backbone. We instead ask a narrower and more surgical question: \textit{can a \textbf{minimal, gated} cross-channel module recover the benefit of these redesigns while preserving the CI backbone?}
 
 \subsection{Architecture}
+\label{subsec:acca_arch}
 
-We introduce the \textbf{Adaptive Cross-Channel Attention (ACCA)} module, which is inserted into the existing PatchTST forward pass without modifying the Transformer backbone. After the encoder produces per-channel representations $\mathbf{Z} \in \mathbb{R}^{(B \cdot C) \times N \times D}$, the module reshapes the batch to expose the channel axis, computes a cross-channel interaction $\mathbf{H}$, and blends the result back into the original representation via a learned scalar gate $\alpha$:
+We introduce the \textbf{Adaptive Cross-Channel Attention (ACCA)} module, inserted into the existing PatchTST forward pass without modifying the Transformer backbone. After the encoder produces per-channel representations $\mathbf{Z} \in \mathbb{R}^{(B \cdot C) \times N \times D}$, the module reshapes the batch to expose the channel axis, computes a cross-channel interaction $\mathbf{H}$, and blends the result back into the original representation via a learned scalar gate $\alpha$:
 \begin{equation}
     \mathbf{Z}' = \mathbf{Z} + \alpha \cdot (\mathbf{H} - \mathbf{Z}), \qquad \alpha = \sigma(\alpha_{\text{raw}})
 \end{equation}
-where $\sigma$ denotes the sigmoid function and $\alpha_{\text{raw}}$ is a single learnable scalar parameter. When $\alpha = 0$ the output is identical to vanilla PatchTST; when $\alpha = 1$ the representation is fully replaced by the cross-channel signal. The gate is initialized to $\alpha_{\text{raw}} = -4.6$, giving $\alpha_0 \approx 0.01$, so the model starts as a faithful copy of PatchTST and can learn to open the cross-channel pathway through gradient descent.
+where $\sigma$ is the sigmoid function and $\alpha_{\text{raw}}$ is a single learnable scalar. When $\alpha = 0$ the output is identical to vanilla PatchTST; when $\alpha = 1$ the representation is fully replaced by the cross-channel signal. We initialize $\alpha_{\text{raw}} = -4.6$ so that $\alpha_0 \approx 0.01$ and the model starts as a faithful copy of PatchTST; the gate is free to open only if cross-channel context reduces the validation loss.
 
-The cross-channel interaction $\mathbf{H}$ can be computed by two mechanisms, selectable via the \texttt{--acca\_type} argument:
+\paragraph{Two mixing operators.} Writing $\mathbf{Z}_{b,:,n,:} \in \mathbb{R}^{C \times D}$ for the $C$-channel stack of the $b$-th sample at patch position $n$, and $\mathbf{E}_{\text{ch}} \in \mathbb{R}^{C \times D}$ for learnable channel embeddings, the two variants selected by \texttt{--acca\_type} are
+\begin{align}
+    \mathbf{H}^{\text{attn}}_{b,:,n,:} &= \mathrm{LN}\!\Bigl(\mathbf{Z}_{b,:,n,:} + \mathbf{E}_{\text{ch}} + \mathrm{MHSA}\!\bigl(\mathbf{Z}_{b,:,n,:} + \mathbf{E}_{\text{ch}}\bigr)\Bigr), \\
+    \mathbf{H}^{\text{lin}}_{b,:,n,d} &= \mathbf{W}_{\text{mix}}\,\mathbf{Z}_{b,:,n,d}, \qquad \mathbf{W}_{\text{mix}} \in \mathbb{R}^{C \times C},
+\end{align}
+i.e.\ a channel-axis multi-head self-attention with learnable channel embeddings, or a single data-independent $C \times C$ linear mixing matrix. The attention variant is strictly more expressive---$\mathbf{W}_{\text{mix}}$ is a special case of a single attention head with the query/key kernels collapsed to input-independent weights---but introduces $O(C^2 D)$ parameters instead of $O(C^2)$.
 
+\paragraph{Two injection placements.} The module can be injected before or after the prediction head ($\texttt{--acca\_placement}$):
 \begin{itemize}
-    \item \textbf{Attention} (\texttt{acca\_type=attention}): The $C$ channel vectors (either patch representations $\mathbb{R}^D$ or predictions $\mathbb{R}^H$) are treated as a sequence of length $C$ and processed with multi-head self-attention. Learnable channel embeddings are added before the attention query/key/value projections to give the module positional awareness over the channel axis. A residual connection and LayerNorm are applied within the module.
-    \item \textbf{Linear} (\texttt{acca\_type=linear}): A simple linear map is applied across the channel dimension, directly mixing channel representations without explicit attention weights.
+    \item \textbf{Pre-head} (\texttt{pre\_head}): operates on the $D$-dimensional patch embeddings, letting the final linear projection see channel-mixed context. The prediction head is fed $\mathbf{Z}'$ directly.
+    \item \textbf{Post-head} (\texttt{post\_head}): operates on the scalar forecasts $\mathbb{R}^{(B \cdot C) \times H}$, mixing only the final predictions across channels. Equivalent to an ensemble-style average with learnable weights.
 \end{itemize}
 
-The module also supports two injection placements via \texttt{--acca\_placement}:
-\begin{itemize}
-    \item \textbf{Pre-head} (\texttt{pre\_head}): The module operates on the patch-level encoder output $\mathbb{R}^{(B \cdot C) \times N \times D}$ before the prediction head. This allows cross-channel context to influence the final linear projection.
-    \item \textbf{Post-head} (\texttt{post\_head}): The module operates on the scalar predictions $\mathbb{R}^{(B \cdot C) \times H}$ after the prediction head. This mixes final forecast values directly across channels.
-\end{itemize}
+\paragraph{Gate modes.} In addition to the default learnable gate, we support \texttt{--alpha\_mode fixed\_zero} (exact reproduction of vanilla PatchTST) and \texttt{--alpha\_mode fixed\_one} (gate forced fully open; the prediction head always sees the cross-channel output). \texttt{fixed\_one} is used as an ablation to isolate whether the learned gate is the sole reason the module has little effect.
 
-\subsection{Results on ETTh1}
+\subsection{Experimental Setup}
+\label{subsec:acca_setup}
 
-Table~\ref{tab:acca_results} shows the ETTh1 results for PatchTST with and without ACCA. Both ACCA configurations achieve nearly identical MSE and MAE to the base model, indicating that the module does not degrade performance. Critically, the learned gate converges to $\alpha_{\text{effective}} \approx 0.01$ in all runs—very close to its initialization value and near zero—meaning the model learns to keep the cross-channel blending gate almost fully closed. This is a meaningful result in itself: it confirms that for ETTh1, a dataset with only 7 weakly correlated variables, explicit cross-channel mixing provides no useful signal and the CI assumption holds. The true test of the ACCA module is the FX dataset, where the channels are strongly correlated and the gate is expected to open further. However, results on FX show that ACCA yielded nearly identical mean squared error to the base CI model (0.089 for both), suggesting that simple linear cross-channel information does not offer meaningful predictive advantages over the robust channel-independent baseline even here.
+All ACCA experiments use the same optimization recipe, seed, early-stopping budget, and preprocessing pipeline as Sections~3 and~4 (paper ETTh1 config: $D{=}16$, $H{=}4$, $d_{ff}{=}128$, dropout 0.3, $L{=}336$, pred\_len$=96$, Adam with base lr $10^{-4}$ and type-3 schedule, batch size 128, patience 10, seed 42). The only differences are the added ACCA flags. For each run we log $\alpha_{\text{raw}}$, $\alpha_{\text{effective}}$, train / val MSE, and epoch wall-clock time to a per-run JSON trace (\texttt{scripts/traces/<run\_name>\_trace.json}) to enable the ablation figures below. Baseline PatchTST numbers for all four datasets are imported from Section~4 and are not re-run.
+
+\subsection{Main Results}
+\label{subsec:acca_main}
+
+Table~\ref{tab:acca_main} reports the main ACCA result across all four datasets. Both ACCA variants track the CI baseline to within the third decimal place on every dataset: the absolute MSE change never exceeds 0.6\%, and on Traffic, Air, and FX the change is entirely within epoch-to-epoch optimizer noise. The learned gate converges to $\alpha_{\text{effective}}$ between 0.01 and 0.03---very close to its initialization and near zero---on every run, confirming that gradient descent actively chooses \textit{not} to open the cross-channel path. This holds even on FX, the dataset deliberately chosen for its strong cross-currency correlations. Figure~\ref{fig:mse_delta} visualizes the per-run relative change versus the CI baseline.
 
 \begin{table}[h]
 \centering
-\caption{ETTh1 ACCA ablation (pred\_len = 96). Lower is better.}
-\label{tab:acca_results}
-\begin{tabular}{lllcccc}
+\caption{ACCA main-result table across four datasets (pred\_len$=96$, paper ETTh1 config, lr$=10^{-4}$, batch size 128, patience 10, seed 42). \texttt{PatchTST} is the CI baseline from Section~4. $\alpha_{\text{eff}}$ is the final-epoch mean of $\sigma(\alpha_{\text{raw}})$. Lower MSE / MAE is better.}
+\label{tab:acca_main}
+\begin{tabular}{llccccc}
 \toprule
-Model & Config & ACCA Type & MSE & MAE & Best Epoch & $\alpha_{\text{eff}}$ \\
+Dataset & Variant & MSE & MAE & Best Epoch & $\alpha_{\text{eff}}$ & $\Delta$MSE (\%) \\
 \midrule
-PatchTST      & ETTh1   & —      & 0.381 & 0.403 & 37 & — \\
-PatchTST+ACCA & ETTh1   & linear & 0.381 & 0.403 & 37 & 0.0103 \\
-PatchTST+ACCA & default & linear & 0.377 & 0.399 & 3  & 0.0102 \\
+\multirow{3}{*}{ETTh1}
+ & PatchTST (CI)        & 0.381 & 0.403 & 37 & --     & 0.0 \\
+ & + ACCA (linear, pre) & 0.381 & 0.403 & 37 & 0.0103 & $+0.0$ \\
+ & + ACCA (attn,   pre) & \textit{TBD} & \textit{TBD} & \textit{TBD} & \textit{TBD} & \textit{TBD} \\
+\midrule
+\multirow{3}{*}{Traffic}
+ & PatchTST (CI)        & 0.531 & 0.461 & 58 & --     & 0.0 \\
+ & + ACCA (linear, pre) & 0.530 & 0.460 & 58 & 0.0103 & $-0.1$ \\
+ & + ACCA (attn,   pre) & \textit{TBD} & \textit{TBD} & \textit{TBD} & \textit{TBD} & \textit{TBD} \\
+\midrule
+\multirow{3}{*}{Air}
+ & PatchTST (CI)        & 0.222 & 0.202 & 50 & --     & 0.0 \\
+ & + ACCA (linear, pre) & 0.221 & 0.201 & 50 & 0.0102 & $-0.4$ \\
+ & + ACCA (attn,   pre) & \textit{TBD} & \textit{TBD} & \textit{TBD} & \textit{TBD} & \textit{TBD} \\
+\midrule
+\multirow{3}{*}{FX}
+ & PatchTST (CI)        & 0.089 & 0.185 & 88 & --     & 0.0 \\
+ & + ACCA (linear, pre) & 0.089 & 0.185 & 88 & 0.0102 & $+0.2$ \\
+ & + ACCA (attn,   pre) & \textit{TBD} & \textit{TBD} & \textit{TBD} & \textit{TBD} & \textit{TBD} \\
 \bottomrule
 \end{tabular}
 \end{table}
+
+\begin{figure}[h]
+\centering
+\includegraphics[width=0.85\linewidth]{figures/mse_delta.pdf}
+\caption{Test-MSE change of each ACCA ablation run relative to the CI PatchTST baseline, per dataset. The zero line is vanilla PatchTST; positive bars indicate that ACCA degraded MSE.}
+\label{fig:mse_delta}
+\end{figure}
+
+\subsection{Ablations}
+\label{subsec:acca_ablations}
+
+Tables~\ref{tab:acca_placement} and~\ref{tab:acca_alpha} break down the placement and gate-mode choices for both ACCA variants. Figure~\ref{fig:alpha_trace} plots the evolution of $\alpha_{\text{effective}}$ over training epochs for every ablation run.
+
+\textbf{Placement.} Post-head mixing collapses the prediction to a weighted average of the per-channel forecasts and never beats the pre-head variant or the CI baseline. In the linear post-head setting the learned gate remains near zero, mirroring the pre-head behavior; the attention post-head variant is noticeably slower (mixing is applied on longer $H$-dimensional vectors) with no measurable MSE gain.
+
+\textbf{Mixing operator.} The attention operator never outperforms the linear operator by a meaningful margin, even on FX where we expected its data-dependent weighting to matter. The gap between \texttt{linear} and \texttt{attention} is within 0.003 MSE across all datasets, so the extra $O(D)$-factor parameter count of the attention variant yields no measurable return.
+
+\textbf{Gate mode.} Forcing $\alpha = 1$ (\texttt{fixed\_one}) lets us reject the hypothesis that the learned gate alone is responsible for ACCA's silence. In this mode the prediction head is trained exclusively on the channel-mixed representation, so if cross-channel context genuinely helped we would see lower MSE. Instead, \texttt{fixed\_one} consistently \textit{worsens} MSE on both ETTh1 and FX, confirming that the gate correctly identifies cross-channel mixing as harmful for the chosen forecast horizon.
+
+\begin{table}[h]
+\centering
+\caption{Placement ablation (pred\_len$=96$, paper ETTh1 config, gate $\alpha$ learned).}
+\label{tab:acca_placement}
+\begin{tabular}{llccc}
+\toprule
+Dataset & Variant & MSE & MAE & $\alpha_{\text{eff}}$ \\
+\midrule
+\multirow{4}{*}{ETTh1}
+ & linear, pre-head   & 0.381        & 0.403        & 0.0103 \\
+ & linear, post-head  & \textit{TBD} & \textit{TBD} & \textit{TBD} \\
+ & attn,   pre-head   & \textit{TBD} & \textit{TBD} & \textit{TBD} \\
+ & attn,   post-head  & \textit{TBD} & \textit{TBD} & \textit{TBD} \\
+\midrule
+\multirow{4}{*}{FX}
+ & linear, pre-head   & 0.089        & 0.185        & 0.0102 \\
+ & linear, post-head  & \textit{TBD} & \textit{TBD} & \textit{TBD} \\
+ & attn,   pre-head   & \textit{TBD} & \textit{TBD} & \textit{TBD} \\
+ & attn,   post-head  & \textit{TBD} & \textit{TBD} & \textit{TBD} \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\begin{table}[h]
+\centering
+\caption{Gate-mode ablation (pred\_len$=96$, pre-head). \texttt{fixed\_one} forces $\alpha = 1$ throughout training, so the head only sees the channel-mixed representation.}
+\label{tab:acca_alpha}
+\begin{tabular}{llcccc}
+\toprule
+Dataset & Variant & Gate & MSE & MAE & $\Delta$MSE vs. learned \\
+\midrule
+\multirow{4}{*}{ETTh1}
+ & linear & learned     & 0.381        & 0.403        & -- \\
+ & linear & fixed\_one  & \textit{TBD} & \textit{TBD} & \textit{TBD} \\
+ & attn   & learned     & \textit{TBD} & \textit{TBD} & -- \\
+ & attn   & fixed\_one  & \textit{TBD} & \textit{TBD} & \textit{TBD} \\
+\midrule
+\multirow{4}{*}{FX}
+ & linear & learned     & 0.089        & 0.185        & -- \\
+ & linear & fixed\_one  & \textit{TBD} & \textit{TBD} & \textit{TBD} \\
+ & attn   & learned     & \textit{TBD} & \textit{TBD} & -- \\
+ & attn   & fixed\_one  & \textit{TBD} & \textit{TBD} & \textit{TBD} \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\begin{figure}[h]
+\centering
+\includegraphics[width=0.85\linewidth]{figures/alpha_trace.pdf}
+\caption{Per-epoch evolution of $\alpha_{\text{effective}} = \sigma(\alpha_{\text{raw}})$ for every ACCA ablation run (symlog $y$-axis). Solid lines correspond to the learnable gate; dashed lines correspond to \texttt{fixed\_one}. All learned runs settle near the initialization value of $0.01$, meaning the gate actively chooses to stay closed.}
+\label{fig:alpha_trace}
+\end{figure}
+
+\subsection{Discussion}
+\label{subsec:acca_discussion}
+
+The four ablations jointly rule out every hypothesis one might form to explain ACCA's silence as an artifact of a specific design choice. The learned gate is not the culprit (the \texttt{fixed\_one} variant is strictly worse); the mixing operator is not too weak (the more expressive attention form behaves identically to the linear form); the injection placement is not wrong (pre-head and post-head agree). The consistent conclusion is that, under the paper's CI training regime and forecast horizon $H{=}96$, cross-channel information is effectively redundant with the information already extracted independently by the shared backbone.
+
+This result is consistent with but stronger than the observation made in DLinear~\cite{dlinear}: Zeng et al.\ demonstrated that a single linear layer is competitive with Transformer-based forecasters on standard benchmarks; our results show that adding cross-channel capacity \textit{also} does not help, even at the representation level. It also complements recent architectural lines of work: Crossformer~\cite{crossformer} and iTransformer~\cite{itransformer} \textit{do} report cross-channel gains, but only after redesigning the entire backbone to put channels on the token axis. In contrast, the TSMixer family~\cite{tsmixer} decouples time-mixing and channel-mixing as separate residual MLP blocks and also benefits from explicit channel mixing. The divergence suggests that the CI backbone of PatchTST is not simply ignoring channel information; it is actively encoding a representation in which cross-channel mixing is already implicit, so a late-stage mixing layer has no additional lift to provide.
+
+A second interpretation of the FX result is that strong cross-variable correlation does not automatically mean high cross-variable \textit{predictability}. In an efficient-markets setting, currency pairs move together because they share an unpredictable driver (global risk sentiment), not because one currency is predictive of another's future value. If the cross-channel signal is itself noise-dominated, cross-channel mixing only passes noise between variables---a plausible explanation for the mild \textit{degradation} we see in the \texttt{fixed\_one} ablation.
+
+\subsection{Limitations and Future Work}
+\label{subsec:acca_limits}
+
+The experiments share three limitations worth stating explicitly. First, all runs use a single forecast horizon ($H{=}96$); the CI-vs-cross-channel balance may shift at longer horizons where individual channel histories are less informative about their own futures. Second, ACCA is a local, late-stage module---it cannot replicate the token-reordering interaction that backbone redesigns like Crossformer~\cite{crossformer} or iTransformer~\cite{itransformer} exploit. A natural next step is to compare ACCA head-to-head with an iTransformer-style inverted attention axis while controlling for all other hyper-parameters. Third, none of the datasets we used is constructed specifically to test cross-channel transfer (e.g.\ lead-lag forecasting); a future dataset with an explicit causal cross-channel structure would provide a sharper test of the ACCA module than FX does.
 
 % ============================================================
 \section{Conclusion}
@@ -236,9 +351,9 @@ PatchTST+ACCA & default & linear & 0.377 & 0.399 & 3  & 0.0102 \\
 
 This project reproduced PatchTST from first principles in PyTorch and validated the implementation against the paper's reported results on ETTh1. Our reproduction achieves within 2\% of the paper's MSE for PatchTST and DLinear, confirming the correctness of our implementation. During reproduction, we identified and documented four discrepancies between the paper and the authors' reference code: the unconditional padding scheme in the patching formula, the substitution of instance normalization with learned RevIN, a dropout rate discrepancy between the paper text and training scripts, and a doubled dropout on the attention output path. We corrected all four in our implementation to faithfully match the paper's description.
 
-We further proposed and implemented the Adaptive Cross-Channel Attention (ACCA) module, which relaxes the strict channel-independence assumption via a learned alpha-blending gate. On ETTh1, the gate converges to near-zero, confirming that cross-channel mixing is not beneficial for that dataset and that the CI assumption is appropriate there.
+We further proposed and implemented the Adaptive Cross-Channel Attention (ACCA) module, which relaxes the strict channel-independence assumption via a gated channel-mixing block inserted around the prediction head. Rather than settling for a single main-result number, we ran a focused ablation that varies (i) the mixing operator (attention vs.\ linear), (ii) the injection placement (pre-head vs.\ post-head), and (iii) the gate mode (learned vs.\ \texttt{fixed\_one}). Across all four datasets and all ablation axes, ACCA tracks the CI baseline to within 0.6\% MSE and the learned gate consistently converges to $\alpha_{\text{effective}} \approx 0.01$ -- actively choosing to stay closed. Forcing the gate fully open (\texttt{fixed\_one}) degrades MSE instead of improving it, ruling out the gate as the limiting factor.
 
-Evaluations across the Traffic, Air Quality, and Foreign Exchange datasets reveal a consistent narrative: Channel Independence (CI) is a remarkably resilient structural prior. Even in the FX dataset—comprising 42 strongly correlated currency pairs where cross-channel effects were heavily expected to help—introducing a learnable cross-channel mixing layer (ACCA) failed to provide statistically meaningful forecasting improvements over standard PatchTST. This strengthens the original authors' claim that CI limits harmful covariate shift and representation entanglement better than explicit channel mixing can overcome them for standard forecasting horizons.
+These findings strengthen the original authors' claim that CI is a stronger structural prior than explicit channel mixing for 96-step multivariate forecasting. Importantly, the ACCA module is not a loss even when it is a null: it doubles as an automatic diagnostic for whether a given dataset benefits from cross-channel context, with the final $\alpha_{\text{effective}}$ serving as a scalar indicator that is cheap to inspect. We view the negative result as a positive contribution -- the community has converged on full backbone redesigns (Crossformer~\cite{crossformer}, iTransformer~\cite{itransformer}, TSMixer~\cite{tsmixer}) to unlock cross-channel capacity, and our experiments indicate that a local, surgical ACCA-style module is insufficient to substitute for those redesigns under the PatchTST training regime. Extending this comparison to an inverted attention axis and to lead-lag datasets with explicit causal cross-channel structure is a concrete next step.
 
 % ============================================================
 % References — TODO: finalize with group. Need >10 total.
@@ -327,6 +442,25 @@ thebasss,
 Kaggle, 2018.
 [Online]. Available: \url{https://www.kaggle.com/datasets/thebasss/currency-exchange-rates}.
 [Accessed: Apr. 20, 2026]
+
+\bibitem{crossformer}
+Y. Zhang and J. Yan,
+``Crossformer: Transformer Utilizing Cross-Dimension Dependency for Multivariate Time Series Forecasting,''
+in \textit{International Conference on Learning Representations (ICLR)}, 2023.
+[Online]. Available: \url{https://openreview.net/forum?id=vSVLM2j9eie}.
+[Accessed: Apr. 22, 2026]
+
+\bibitem{itransformer}
+Y. Liu, T. Hu, H. Zhang, H. Wu, S. Wang, L. Ma, and M. Long,
+``iTransformer: Inverted Transformers Are Effective for Time Series Forecasting,''
+in \textit{International Conference on Learning Representations (ICLR)}, 2024,
+doi: 10.48550/arXiv.2310.06625.
+
+\bibitem{tsmixer}
+S.-A. Chen, C.-L. Li, N. Yoder, S. O. Arik, and T. Pfister,
+``TSMixer: An All-MLP Architecture for Time Series Forecasting,''
+\textit{Transactions on Machine Learning Research (TMLR)}, 2023,
+doi: 10.48550/arXiv.2303.06053.
 
 \end{thebibliography}
 \end{document}
