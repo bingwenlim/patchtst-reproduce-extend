@@ -14,12 +14,23 @@ already covered:
 Each run invokes train.py with `--run_name <id>` so a per-epoch alpha / MSE
 trace is written to scripts/traces/<id>_trace.json.
 
-Outputs (aggregated across runs):
+CLI:
+    # Run the full 14-run matrix
+    uv run python scripts/run_acca_ablations.py
+
+    # Run only ETTh1 ablations (fast on CPU, ~5h total)
+    uv run python scripts/run_acca_ablations.py --datasets ETTh1
+
+    # Run only FX and ETTh1 (most relevant when compute is limited)
+    uv run python scripts/run_acca_ablations.py --datasets ETTh1 fx
+
+Outputs (aggregated across runs; filtering applies to the tables too):
     scripts/acca_ablation_results.json
     scripts/acca_ablation_results.md
 """
 from __future__ import annotations
 
+import argparse
 import json
 import subprocess
 from collections import defaultdict
@@ -150,7 +161,29 @@ def run_one(spec):
 
 
 def main():
-    results = [run_one(spec) for spec in RUNS]
+    parser = argparse.ArgumentParser()
+    parser.add_argument(
+        "--datasets", nargs="*", default=None,
+        help="Subset of datasets to run (default: all).",
+    )
+    parser.add_argument(
+        "--dry_run", action="store_true",
+        help="Print planned runs without executing them.",
+    )
+    args = parser.parse_args()
+
+    active = RUNS
+    if args.datasets:
+        active = [r for r in RUNS if r["dataset"] in args.datasets]
+        if not active:
+            raise SystemExit(f"No runs match datasets={args.datasets}")
+    print(f"Planned {len(active)} run(s):")
+    for r in active:
+        print(f"  - {r['name']} (dataset={r['dataset']})")
+    if args.dry_run:
+        return
+
+    results = [run_one(spec) for spec in active]
 
     timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     json_path = REPO_ROOT / "scripts" / "acca_ablation_results.json"
