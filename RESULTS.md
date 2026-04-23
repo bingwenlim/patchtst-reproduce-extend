@@ -94,12 +94,12 @@ The paper's 0.435 was obtained by running Autoformer across 6 different seq_len 
 
 | Model                        | Config                   | MSE    | MAE    | Best Epoch | Time    |
 | ---------------------------- | ------------------------ | ------ | ------ | ---------- | ------- |
-| PatchTST                     | paper config             | 0.531  | 0.461  | 58         | 2962.6s |
-| PatchTST (ACCA linear, pre)  | learned                  | 0.530  | 0.460  | 58         | 3051.2s |
-| PatchTST (ACCA attn,   pre)  | learned                  | 0.5431 | 0.4666 | 45         | 7799.2s |
-| PatchTST (ACCA attn,   post) | learned                  | 0.5425 | 0.4612 | 49         | 2276.3s |
-| DLinear                      | default                  | 0.581  | 0.517  | 15         | 20.5s   |
-| Autoformer                   | paper config             | 0.685  | 0.539  | 10         | 526.3s  |
+| PatchTST                     | paper config             | 0.531  | 0.461  | 58         | 2962.6s    |
+| PatchTST (ACCA linear, pre)  | learned                  | 0.530  | 0.460  | 58         | 3051.2s    |
+| PatchTST (ACCA attn,   pre)  | learned                  | 0.5431 | 0.4666 | 45         | 7799.2484s |
+| PatchTST (ACCA attn,   post) | learned                  | 0.5425 | 0.4612 | 49         | 2276.2533s |
+| DLinear                      | default                  | 0.581  | 0.517  | 15         | 20.5s      |
+| Autoformer                   | paper config             | 0.685  | 0.539  | 10         | 526.3s     |
 
 
 ## Air Quality (pred_len=96)
@@ -108,12 +108,12 @@ The paper's 0.435 was obtained by running Autoformer across 6 different seq_len 
 
 | Model                        | Config                   | MSE    | MAE    | Best Epoch | Time    |
 | ---------------------------- | ------------------------ | ------ | ------ | ---------- | ------- |
-| PatchTST                     | paper config             | 0.222  | 0.202  | 50         | 1668.3s |
-| PatchTST (ACCA linear, pre)  | learned                  | 0.221  | 0.201  | 50         | 1731.5s |
-| PatchTST (ACCA attn,   pre)  | learned                  | 0.2444 | 0.2307 | 39         | 1612.3s |
-| PatchTST (ACCA attn,   post) | learned                  | 0.2458 | 0.2329 | 54         | 1675.9s |
-| DLinear                      | default                  | 0.278  | 0.289  | 11         | 11.7s   |
-| Autoformer                   | paper config             | 0.404  | 0.337  | 9          | 429.9s  |
+| PatchTST                     | paper config             | 0.222  | 0.202  | 50         | 1668.3s    |
+| PatchTST (ACCA linear, pre)  | learned                  | 0.221  | 0.201  | 50         | 1731.5s    |
+| PatchTST (ACCA attn,   pre)  | learned                  | 0.2444 | 0.2307 | 39         | 1612.2697s |
+| PatchTST (ACCA attn,   post) | learned                  | 0.2458 | 0.2329 | 54         | 1675.9078s |
+| DLinear                      | default                  | 0.278  | 0.289  | 11         | 11.7s      |
+| Autoformer                   | paper config             | 0.404  | 0.337  | 9          | 429.9s     |
 
 
 ## FX (pred_len=96)
@@ -122,15 +122,15 @@ The paper's 0.435 was obtained by running Autoformer across 6 different seq_len 
 
 | Model                        | Config                   | MSE    | MAE    | Best Epoch | Time    |
 | ---------------------------- | ------------------------ | ------ | ------ | ---------- | ------- |
-| PatchTST                     | paper config             | 0.089  | 0.185  | 88         | 934.2s  |
-| PatchTST (ACCA linear, pre)  | learned                  | 0.089  | 0.185  | 88         | 981.6s  |
-| PatchTST (ACCA linear, post) | learned                  | 0.0962 | 0.1933 | 83         | 981.3s  |
-| PatchTST (ACCA attn,   pre)  | learned                  | 0.0957 | 0.1928 | 86         | 1568.5s |
-| PatchTST (ACCA attn,   post) | learned                  | 0.0958 | 0.1930 | 69         | 846.5s  |
-| PatchTST (ACCA attn,   pre)  | **fixed_one**            | 0.1183 | 0.2211 | 73         | 1352.0s |
-| PatchTST (ACCA linear, pre)  | **fixed_one**            | 0.3059 | 0.3673 | 67         | 839.4s  |
-| DLinear                      | default                  | 0.155  | 0.260  | 47         | 8.4s    |
-| Autoformer                   | paper config             | 0.166  | 0.287  | 65         | 238.8s  |
+| PatchTST                     | paper config             | 0.089  | 0.185  | 88         | 934.2s     |
+| PatchTST (ACCA linear, pre)  | learned                  | 0.089  | 0.185  | 88         | 981.6s     |
+| PatchTST (ACCA linear, post) | learned                  | 0.0962 | 0.1933 | 83         | 981.2979s  |
+| PatchTST (ACCA attn,   pre)  | learned                  | 0.0957 | 0.1928 | 86         | 1568.5886s |
+| PatchTST (ACCA attn,   post) | learned                  | 0.0958 | 0.1930 | 69         | 846.5207s  |
+| PatchTST (ACCA attn,   pre)  | **fixed_one**            | 0.1183 | 0.2211 | 73         | 1352.0344s |
+| PatchTST (ACCA linear, pre)  | **fixed_one**            | 0.3059 | 0.3673 | 67         | 839.4074s  |
+| DLinear                      | default                  | 0.155  | 0.260  | 47         | 8.4s       |
+| Autoformer                   | paper config             | 0.166  | 0.287  | 65         | 238.8s     |
 
 
 ## ACCA full ablation (pred_len=96)
