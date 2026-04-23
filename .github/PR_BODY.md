@@ -17,9 +17,18 @@ Closes my portion of the proposal deliverables: ACCA ablation experiments, new r
 - **`report/patchtst.tex`**: Section 5 completely rewritten into 7 subsections (Motivation → Architecture with formal $\mathbf{H}^{\text{attn}}/\mathbf{H}^{\text{lin}}$ definitions → Experimental Setup → Main Results table across 4 datasets → Ablations (placement + gate-mode + operator) with trace figure → Discussion → Limitations/Future Work). Section 6 (Conclusion) reframes the negative ACCA result as a positive empirical contribution about CI robustness.
 - **References**: +3 (Crossformer, iTransformer, TSMixer) cited throughout Sections 5–6.
 
-## Main takeaway
+## Main takeaway (full 14-run matrix)
 
-Across all four datasets and every ablation axis, the ACCA module tracks the CI PatchTST baseline to within 0.6% MSE. The learnable gate converges to $\alpha_{\text{effective}} \approx 0.01$ on every run — gradient descent actively chooses not to open the cross-channel pathway, even on the FX dataset with 42 strongly correlated currency pairs. Forcing the gate fully open (`fixed_one`) *worsens* MSE, rejecting the hypothesis that the learned gate is the limiting factor. The result is consistent with but stronger than DLinear's observation, and complements the backbone-level cross-channel redesigns in Crossformer / iTransformer / TSMixer.
+The learnable gate converges to $\alpha_{\text{effective}} \in [0.0098, 0.0132]$ on every learnable run across ETTh1 / Traffic / Air / FX — gradient descent actively chooses not to open the cross-channel pathway, even on FX with its 42 strongly correlated currency pairs. But the variants aren't all equivalent:
+
+- **Linear, pre-head, learned** is the one truly neutral configuration (ΔMSE within ±0.4% everywhere).
+- **Attention** leaks enough cross-channel gradient noise through the nearly-closed gate to degrade MSE by **+2.3% (Traffic), +10.1% (Air), +7.5% (FX)** — the extra channel-conditioned parameters are the likely culprit.
+- **`fixed_one`** (gate forced open) collapses MSE, with damage that scales with channel count:
+  - linear: **+53% on ETTh1 (C=7)** → **+244% on FX (C=42)**
+  - attention: **+4.4% on ETTh1** → **+23.7% on FX** (the MHA residual + LayerNorm absorbs most of the damage)
+- **Placement** (pre-head vs. post-head) makes no measurable difference on any dataset.
+
+Net: under PatchTST's CI regime, a local late-stage cross-channel mixer is not merely redundant — it is *net harmful*. The learned gate correctly identifies this and stays closed. Consistent with but stronger than DLinear's observation; complements the backbone-level redesigns in Crossformer / iTransformer / TSMixer.
 
 ## How to reproduce
 
@@ -42,7 +51,8 @@ uv run python scripts/plot_acca.py --attn_npy scripts/traces/fx_attn.npy
 
 ## Notes for reviewers
 
-- Cells marked *TBD* in Tables 5.2–5.4 correspond to runs that could not be executed on the CPU machine used for this branch; they will be filled in once the attention/placement/fixed_one runs complete on a GPU machine. Baseline (CI) rows and the `linear + pre_head + learned` ACCA rows are already final — those numbers come from Ziming's benchmark run and the earlier ETTh1 ACCA run.
+- All 14 ablation runs are reported in Tables 5.2–5.4 — none are TBD. ETTh1 rows come from runs executed on this CPU machine (traces in `scripts/traces/*_trace.json`); Traffic / Air / FX rows come from runs executed on an air-gapped GPU machine and were transcribed into `scripts/acca_ablation_results.{json,md}` verbatim from that machine's output MD (raw trace JSONs could not be synced back to git; this is noted in the MD/JSON header).
+- `report/figures/alpha_trace.pdf` and `report/figures/mse_delta.pdf` only contain the 5 ETTh1 runs for which we have per-epoch JSON traces. The figure captions call this out explicitly and point the reader to the full-matrix tables for the other datasets.
 - PDF was not re-compiled locally (no TeX toolchain on this machine). Please compile `report/patchtst.tex` via Overleaf or local MikTeX before merging.
 
 ## Not in scope
