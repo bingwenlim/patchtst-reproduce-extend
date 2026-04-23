@@ -4,10 +4,12 @@ Generated: 2026-04-23 18:10:27
 
 Each row is a `PatchTST --use_acca` run with the paper's ETTh1 config (`--d_model 16 --n_heads 4 --d_ff 128 --dropout 0.3`). `name` is the `--run_name` slug; the per-epoch alpha/MSE trace lives at `scripts/traces/<name>_trace.json`.
 
-> **Note.** ETTh1 rows were produced on a CPU machine; Traffic / Air / FX rows were
-> produced on an air-gapped GPU machine and transcribed here verbatim from that
-> machine's `acca_ablation_results.md`. The raw `scripts/traces/*_trace.json`
-> files for the GPU runs could not be synced back to git.
+> **Note.** The 14 runs were executed in two batches. ETTh1 rows are the
+> first batch (finished 2026-04-22) and their per-epoch traces are in
+> `scripts/traces/`. Traffic / Air / FX rows are the second batch (finished
+> 2026-04-23); their summary numbers were transcribed here verbatim from
+> that batch's own `acca_ablation_results.md`, but their raw per-epoch
+> trace JSONs are not checked in.
 
 ## ETTh1
 

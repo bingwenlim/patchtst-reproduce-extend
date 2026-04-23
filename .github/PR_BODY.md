@@ -33,7 +33,7 @@ Net: under PatchTST's CI regime, a local late-stage cross-channel mixer is not m
 ## How to reproduce
 
 ```bash
-# Full 14-run matrix (needs a GPU machine; takes ~7h on MPS)
+# Full 14-run matrix (takes several hours; use a fast machine)
 uv run python scripts/run_acca_ablations.py
 
 # ETTh1 only (feasible on CPU overnight)
@@ -51,8 +51,8 @@ uv run python scripts/plot_acca.py --attn_npy scripts/traces/fx_attn.npy
 
 ## Notes for reviewers
 
-- All 14 ablation runs are reported in Tables 5.2–5.4 — none are TBD. ETTh1 rows come from runs executed on this CPU machine (traces in `scripts/traces/*_trace.json`); Traffic / Air / FX rows come from runs executed on an air-gapped GPU machine and were transcribed into `scripts/acca_ablation_results.{json,md}` verbatim from that machine's output MD (raw trace JSONs could not be synced back to git; this is noted in the MD/JSON header).
-- `report/figures/alpha_trace.pdf` and `report/figures/mse_delta.pdf` only contain the 5 ETTh1 runs for which we have per-epoch JSON traces. The figure captions call this out explicitly and point the reader to the full-matrix tables for the other datasets.
+- All 14 ablation runs are reported in Tables 5.2–5.4 — none are TBD. The runs were done in two batches: the ETTh1 batch has per-epoch traces in `scripts/traces/*_trace.json`; the Traffic / Air / FX batch's summary numbers are transcribed into `scripts/acca_ablation_results.{json,md}` verbatim from that batch's own aggregate MD, and its raw per-epoch trace JSONs are not checked in (this is noted in the MD/JSON header).
+- `report/figures/alpha_trace.png` and `report/figures/mse_delta.png` are the full 14-run plots from the second batch's `plot_acca.py` run.
 - PDF was not re-compiled locally (no TeX toolchain on this machine). Please compile `report/patchtst.tex` via Overleaf or local MikTeX before merging.
 
 ## Not in scope

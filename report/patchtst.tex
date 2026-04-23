@@ -262,8 +262,8 @@ Dataset & Variant & MSE & MAE & Best Epoch & $\alpha_{\text{eff}}$ & $\Delta$MSE
 
 \begin{figure}[h]
 \centering
-\includegraphics[width=0.85\linewidth]{figures/mse_delta.pdf}
-\caption{Test-MSE change of each ACCA ablation run relative to the CI PatchTST baseline, per dataset (shown here for ETTh1; full numerical results for Traffic, Air, and FX are in Tables~\ref{tab:acca_main}--\ref{tab:acca_alpha}). The zero line is vanilla PatchTST; positive bars indicate that ACCA degraded MSE.}
+\includegraphics[width=0.85\linewidth]{figures/mse_delta.png}
+\caption{Test-MSE change of each ACCA ablation run relative to the CI PatchTST baseline, grouped by dataset. The zero line is vanilla PatchTST; positive bars indicate that ACCA degraded MSE. The \texttt{line\_pre\_fixedone} bar on FX extends to $+243.7\%$ and dwarfs the rest; the corresponding ETTh1 bar ($+53.4\%$) is cropped off the plot for axis legibility and is reported in Table~\ref{tab:acca_alpha}.}
 \label{fig:mse_delta}
 \end{figure}
 
@@ -326,8 +326,8 @@ Dataset & Variant & Gate & MSE & MAE & $\Delta$MSE vs. learned \\
 
 \begin{figure}[h]
 \centering
-\includegraphics[width=0.85\linewidth]{figures/alpha_trace.pdf}
-\caption{Per-epoch evolution of $\alpha_{\text{effective}} = \sigma(\alpha_{\text{raw}})$ for the five ETTh1 ACCA ablation runs (symlog $y$-axis). Solid lines correspond to the learnable gate; dashed lines correspond to \texttt{fixed\_one}. All learned runs settle near the initialization value of $0.01$, meaning the gate actively chooses to stay closed. The qualitative behavior on Traffic, Air, and FX is identical: see the $\alpha_{\text{eff}}$ columns of Tables~\ref{tab:acca_main}--\ref{tab:acca_alpha}, all in the range $[0.0098, 0.0132]$.}
+\includegraphics[width=0.85\linewidth]{figures/alpha_trace.png}
+\caption{Per-epoch evolution of $\alpha_{\text{effective}} = \sigma(\alpha_{\text{raw}})$ for every ACCA ablation run (symlog $y$-axis). Solid lines correspond to the learnable gate; dashed lines correspond to \texttt{fixed\_one}. All learned runs settle in the tight band $[0.0098, 0.0132]$ near the initialization value of $0.01$---the gate actively chooses to stay closed on every dataset. The two \texttt{fixed\_one} traces are pinned at $\alpha = 1$ by construction.}
 \label{fig:alpha_trace}
 \end{figure}
 

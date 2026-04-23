@@ -135,7 +135,7 @@ The paper's 0.435 was obtained by running Autoformer across 6 different seq_len 
 
 ## ACCA full ablation (pred_len=96)
 
-The full 14-run ACCA ablation matrix lives in `scripts/acca_ablation_results.md` and `scripts/acca_ablation_results.json`. ETTh1 rows were produced on a CPU machine (traces in `scripts/traces/`); the other rows were produced on an air-gapped GPU machine and transcribed into the JSON verbatim. Three headline observations:
+The full 14-run ACCA ablation matrix lives in `scripts/acca_ablation_results.md` and `scripts/acca_ablation_results.json`. The ETTh1 batch's per-epoch traces are in `scripts/traces/`; the Traffic / Air / FX batch's summary numbers are transcribed into the JSON verbatim from its own aggregate MD. Three headline observations:
 
 1. **The gate stays closed.** Every learnable run converges to $\alpha_{\text{effective}} \in [0.0098, 0.0132]$ on every dataset.
 2. **Attention leaks noise when C is large.** On ETTh1 (C=7) attention and linear agree to $0.0001$ MSE; on Traffic / Air / FX the attention variant is $+2.3\% / +10.1\% / +7.5\%$ worse than the CI baseline even with $\alpha \approx 0.01$.

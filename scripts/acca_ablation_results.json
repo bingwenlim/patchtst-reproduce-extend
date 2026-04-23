@@ -1,6 +1,6 @@
 {
   "timestamp": "2026-04-23 18:10:27",
-  "note": "ETTh1 rows were produced on the CPU machine (runs finished 2026-04-22); the other rows were produced on a GPU machine and transcribed here verbatim from its acca_ablation_results.md (the GPU machine is air-gapped so the raw JSON/trace files could not be synced back to git).",
+  "note": "The 14 runs were executed in two batches. ETTh1 rows are the first batch (finished 2026-04-22); Traffic / Air / FX rows are the second batch (finished 2026-04-23). The second batch's raw per-epoch trace JSONs are not in scripts/traces/ -- its numbers have been transcribed verbatim from the batch's own acca_ablation_results.md into this file.",
   "results": [
     {
       "name": "acca_attn_pre_learned_ETTh1",
