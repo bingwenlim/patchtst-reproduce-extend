@@ -210,6 +210,14 @@ checkpoints/
 # Running ablation log (regenerated on each run)
 scripts/ablation_*.log
 
+# Local developer helpers (names always start with a leading underscore
+# so they don't clash with the production scripts in the same folder).
+scripts/_*.py
+
+# Stray training-run logs that occasionally get dropped at the repo root
+# by one-off smoke tests. Use scripts/traces/ for anything worth keeping.
+training_output.txt
+
 # OS generated files
 .DS_Store
 .DS_Store?
