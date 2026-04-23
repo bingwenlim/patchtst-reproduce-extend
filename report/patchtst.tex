@@ -22,18 +22,9 @@ Patch-Based Transformers for Long-Term Time Series Forecasting}
 \section{Introduction}
 % ============================================================
 
-Long-term time series forecasting (LTSF) is a critical task in fields ranging from energy grid management to financial market analysis. While Transformer architectures have dominated sequence modeling in natural language processing, their application to LTSF has been hindered by limitations in point-wise tokenization.  They treat each individual time step as a token, resulting in $O(L^2)$ attention complexity over the sequence length L.  They also have poor inductive bias as a single scalar value provides limited contextual information in isolation.
+Long-term time series forecasting (LTSF) matters for operations and finance, but standard Transformers tokenize each time step, incurring $O(L^2)$ attention and weak inductive bias from scalar tokens. Informer \cite{informer} and Autoformer \cite{autoformer} improve efficiency or decomposition yet still use point-wise tokens; Zeng et al.\ showed DLinear can match or beat such models \cite{dlinear}.
 
-Early Transformer-based forecasting models attempted to improve efficiency and temporal modeling. Informer introduced ProbSparse attention to reduce the quadratic cost \cite{informer}, while Autoformer incorporated seasonal-trend decomposition to try and capture long-term temporal patterns \cite{autoformer}. However, neither approach fundamentally departs from point-wise tokenization of time steps. This limitation was empirically highlighted by Zeng et al., who showed that a simple single-layer linear model (DLinear) could match or outperform complex Transformer-based architectures like Autoformer on standard benchmarks \cite{dlinear}.
-
-PatchTST addresses this by borrowing an insight from computer vision: just as images are tokenized into patches rather than pixels, time series can be tokenized into contiguous segments of consecutive time steps. Each patch captures a local temporal pattern (a trend, a spike, or a seasonal fragment) rather than a meaningless point, while reducing the number of tokens roughly by a factor of $S$ where $S$ is the stride length. The model further adopts a Channel-Independent (CI) design, where each variable in a multivariate series is processed as a separate univariate sequence through a shared Transformer backbone. This acts as a powerful regularizer and effectively multiplies the available training data by the number of channels.
-In this project, we reproduce and extend PatchTST to evaluate both its claims and its architectural limitations. Our contributions are:
-\begin{itemize}
-\item \textbf{Reproduction from First Principles:} A ground-up PyTorch implementation based on the paper's description, validated on ETTh1 against the paper's reported metrics. We document discrepancies between the paper and the authors' reference code, including the use of RevIN in place of the described instance normalization, and an unconditional padding scheme in the patching formula that we correct.
-\item \textbf{Evaluation on additional datasets:} We evaluate PatchTST, DLinear, and Autoformer on datasets beyond the original benchmarks, including a highly correlated multivariate dataset, to test whether the reported advantages generalize.
-\item \textbf{Cross-Channel Extension:} A cross-channel attention module that relaxes the CI assumption, targeting scenarios where channels share partial temporal patterns and the shared backbone may receive conflicting training signals under strict independence.
-
-\end{itemize}
+PatchTST segments series into patches (like image patches), shrinking the token count by $\sim S$ (stride) and encoding local shape. A Channel-Independent (CI) backbone processes each variable as a separate univariate stream---strong regularization and $C\times$ more pseudo-samples. We reproduce PatchTST in PyTorch, extend it with a gated cross-channel module, and stress-test CI on extra benchmarks. Contributions: (i) paper-faithful implementation with documented paper-vs.-code gaps; (ii) PatchTST vs.\ DLinear/Autoformer on Traffic, Air, and a correlated FX set; (iii) Adaptive Cross-Channel Attention (ACCA) ablations in Section~\ref{sec:extension}.
 
 % ============================================================
 \section{PatchTST}
@@ -51,15 +42,11 @@ Before entering the model, each sample is independently normalized along the tim
     \mu_c = \frac{1}{L}\sum_{t=1}^{L} x_{t,c}, \qquad
     \sigma_c = \sqrt{\frac{1}{L}\sum_{t=1}^{L}(x_{t,c} - \mu_c)^2 + \epsilon}
 \end{equation}
-This is distinct from the dataset-level z-score standardization applied during preprocessing, which uses global training set statistics to bring all channels to a common scale. Instance normalization operates per-sample, stripping each individual window's local level and spread so the model focuses on the shape of the signal rather than its absolute position, addressing the non-stationarity inherent in time series data. The statistics are detached from the computation graph---the model cannot learn to manipulate them through backpropagation.
-
-Notably, the official implementation replaces this with RevIN~\cite{revin}, a learned normalization module with trainable affine parameters ($\gamma$, $\beta$). The paper itself describes only the simpler statistical normalization without learned parameters. We implement the paper's description.
+Per-sample stats are detached from the graph. Preprocessing still applies train-set z-score for scale. The official code uses RevIN~\cite{revin}; we follow the paper's non-learned instance norm.
 
 \subsection{Channel Independence}
 
-The input $\mathbf{X} \in \mathbb{R}^{B \times L \times C}$ is reshaped to $\mathbb{R}^{(B \cdot C) \times L}$ by treating each channel as an independent sample. From this point, the model processes $B \cdot C$ univariate sequences through a shared backbone with no cross-channel interaction. This design rests on the assumption that useful temporal patterns can be learned independently and shared across channels---whether because channels are independent, or because they share sufficiently similar dynamics that a single set of learned temporal patterns serves all channels.
-
-This assumption provides two concrete benefits: regularization (the model cannot overfit to spurious cross-channel correlations) and data efficiency ($C$ times more training sequences from the same data). However, it introduces a failure mode when channels share partial temporal patterns: the shared backbone may receive contradictory gradient signals from channels that look similar in the lookback window but diverge in the prediction horizon. Our extension in Section~\ref{sec:extension} addresses this limitation.
+The input $\mathbf{X} \in \mathbb{R}^{B \times L \times C}$ is reshaped to $\mathbb{R}^{(B \cdot C) \times L}$; a shared backbone sees no cross-channel mixing. CI regularizes against spurious correlations and yields $C\times$ more sequences, but can stress the backbone when channels partially disagree; Section~\ref{sec:extension} probes this with ACCA.
 
 \subsection{Patching}
 
@@ -67,9 +54,7 @@ The univariate sequences are segmented into overlapping patches using a sliding 
 \begin{equation}
     N = \left\lceil\frac{L - P}{S}\right\rceil + 1
 \end{equation}
-When the sequence length does not divide evenly, the final values are replicated to complete the last patch. The original paper defines $N = \lfloor(L{-}P)/S\rfloor + 2$ and unconditionally pads $S$ values, which produces an identical result when padding is needed but creates a redundant patch containing fabricated data when the sequence divides cleanly. We adopt the ceiling formulation, which pads only when necessary.
-
-Patching reduces the attention complexity from $O(L^2)$ to $O(N^2)$. With typical settings ($L{=}336$, $P{=}16$, $S{=}8$), this reduces the token count from 336 to 41 (an ${\approx}8\times$ reduction), and the quadratic attention cost by approximately $67\times$.
+We pad the tail by replication only when needed; the reference pads unconditionally and can add a spurious patch when $L$ divides cleanly. Complexity drops from $O(L^2)$ to $O(N^2)$; for $L{=}336$, $P{=}16$, $S{=}8$, tokens fall 336$\to$41 (${\approx}8\times$, ${\approx}67\times$ attention cost).
 
 \subsection{Patch Embedding}
 
@@ -83,17 +68,11 @@ where $\mathbf{e}_i$ is the $i$-th row of a learnable positional embedding matri
 
 \subsection{Transformer Encoder}
 
-The encoder consists of $M$ identical layers, each containing two sub-blocks:
-\begin{enumerate}
-    \item \textbf{Multi-head self-attention}: The input is projected into queries, keys, and values via learned linear transformations, then split across $H$ attention heads each operating in $D/H$ dimensions. Each head computes scaled dot-product attention over the same set of $N$ patch tokens in a different projected subspace, then the heads are concatenated and projected back to $D$ dimensions.
-    \item \textbf{Position-wise feed-forward network}: A two-layer MLP ($D \to d_{ff} \to D$) with GELU activation expands and compresses each token's representation independently.
-\end{enumerate}
-Both sub-blocks use residual connections followed by BatchNorm---a departure from the LayerNorm used in standard Transformers~\cite{vaswani2017}. The normalization is applied post-residual (post-norm), meaning the residual is added before normalization:
+Each of $M$ layers stacks multi-head self-attention over $N$ patches and a GELU FFN ($D \to d_{ff} \to D$), with residuals and \textbf{BatchNorm} after each sub-block (post-norm), unlike LayerNorm Transformers~\cite{vaswani2017}. With CI, effective batch is $B{\cdot}C$, stabilizing BN. The updates are:
 \begin{align}
     \mathbf{z}' &= \text{BatchNorm}(\mathbf{z} + \text{Dropout}(\text{MHA}(\mathbf{z}))) \\
     \mathbf{z}'' &= \text{BatchNorm}(\mathbf{z}' + \text{Dropout}(\text{FFN}(\mathbf{z}')))
 \end{align}
-In a channel-independent setting, the effective batch size is $B \cdot C$ (e.g., $128 \times 7 = 896$), providing the statistical stability that BatchNorm requires.
 
 \subsection{Prediction Head and Denormalization}
 
@@ -103,9 +82,9 @@ The encoder output $\mathbb{R}^{(B \cdot C) \times N \times D}$ is flattened to 
 \section{Reproduction}
 % ============================================================
 
-We implemented PatchTST in PyTorch based on the paper's description, cross-referencing the authors' source code~\cite{patchtst_github} where the paper was ambiguous. The core architecture---patching, multi-head attention, and encoder---was built from scratch; standard components such as the feed-forward dropout placement were adopted from the reference implementation. DLinear and Autoformer were adopted from Time-Series-Library~\cite{time_series_library}. To validate correctness, we trained all three models on ETTh1 (7 variables, hourly, 17,420 time steps, standard 12/4/4 month split) using the authors' ETTh1 configuration: $L{=}336$, $T{=}96$, $P{=}16$, $S{=}8$, $D{=}16$, $H{=}4$, $d_{ff}{=}128$, $M{=}3$ layers, dropout 0.3, Adam ($\text{lr}{=}10^{-4}$, constant for 3 epochs then $0.9\times$ decay per epoch following the reference code), batch size 128. We deviated from the paper's settings in two respects: seed 42 (vs.\ 2021) and early stopping patience 10 (vs.\ 100).
+We implemented PatchTST in PyTorch from the paper, using the official repo~\cite{patchtst_github} only to resolve ambiguities; DLinear/Autoformer come from Time-Series-Library~\cite{time_series_library}. ETTh1 (7 vars, 12/4/4 split): $L{=}336$, pred 96, $P{=}16$, $S{=}8$, $D{=}16$, 4 attention heads, $d_{ff}{=}128$, $M{=}3$, dropout 0.3, Adam lr $10^{-4}$ with $0.9\times$/epoch decay after 3 epochs, batch 128. We use seed 42 and patience 10 (paper: 2021, 100).
 
-During reproduction, we identified four discrepancies between the paper and its reference code: (1) the patching formula unconditionally pads $S$ values, producing a redundant patch when the sequence divides evenly---we corrected this as described in Section~2.4; (2) the official implementation replaces instance normalization with RevIN, a learned normalization module---we followed the paper; (3) the paper text (Appendix A.1.4) reports dropout 0.2 while the authors' ETTh1 training script uses 0.3---we used 0.3; (4) the reference code applies dropout twice on the attention output---once after the output projection inside the attention module, and again on the residual path in the encoder layer---resulting in an effective drop rate of $1-(1-p)^2 \approx 0.51$ for $p{=}0.3$. The paper describes a single dropout per sub-block. We removed the redundant projection dropout to match the paper's description.
+Paper vs.\ code gaps we document/fix: (1) unconditional patch padding (Section~2.4); (2) RevIN vs.\ paper instance norm---we use the paper; (3) dropout 0.2 in text vs.\ 0.3 in script---we use 0.3; (4) double attention dropout in code ($\approx 0.51$ effective for $p{=}0.3$)---we keep one dropout to match the paper.
 
 \begin{table}[h]
 \centering
@@ -122,34 +101,22 @@ Autoformer & 0.435 & 0.528 & 0.446 & 0.491 & 1205s \\
 \end{tabular}
 \end{table}
 
-PatchTST and DLinear are within 2\% of the paper's reported MSE (Table~3,
-PatchTST/42 and DLinear for ETTh1 96 metric, in \cite{patchtst}), confirming
-faithful implementations. The Autoformer gap is expected: the paper swept six
-lookback lengths ($L \in \{24, 48, 96, 192, 336, 720\}$) and reported the best
-result; we only evaluated at $L{=}336$.
+PatchTST/DLinear match the paper within ${\approx}2\%$ MSE \cite{patchtst}. Autoformer differs because the paper reports the best of six lookbacks; we use only $L{=}336$.
 
 % ============================================================
 \section{Evaluation on Additional Datasets}
 \label{sec:evaluation}
 % ============================================================
 
-To assess whether PatchTST's reported advantages generalize beyond the paper's original benchmarks, we evaluate all three models on two additional standard forecasting datasets (Traffic and Air Quality) and one highly correlated multivariate dataset (Foreign Exchange rates). All experiments use prediction horizon $H{=}96$ and the same ETTh1 paper configuration: $L{=}336$, $P{=}16$, $S{=}8$, $D{=}16$, $H{=}4$, $d_{ff}{=}128$, $M{=}3$ layers, dropout 0.3.
+We add Traffic, Beijing PM2.5, and a 42-pair FX set~\cite{traffic_dataset,air_dataset,fx_dataset} (high cross-channel correlation) with $H{=}96$ and the ETTh1 hyper-parameters above.
 
-\subsection{Datasets}
+\subsection{Datasets and Preprocessing}
 
-\textbf{Traffic.} The Metro Interstate Traffic Volume dataset~\cite{traffic_dataset} contains 48,204 hourly records from October 2012 to September 2018, recorded at a sensor on I-94 westbound in Minneapolis--Saint Paul, USA. The dataset comprises 20 numeric channels, including weather covariates (temperature, rainfall, snowfall, cloud cover), engineered cyclical time features (hour, day-of-week, month), and binary weather condition flags. The forecasting target is the \texttt{traffic\_volume} channel. Data is split 70\% / 15\% / 15\% for train, validation, and test sets.
-
-\textbf{Air Quality.} The Beijing PM2.5 dataset~\cite{air_dataset} contains 41,757 hourly records and 16 numeric channels capturing meteorological measurements (dew point, temperature, atmospheric pressure, cumulative wind speed, snow and rain hours) alongside wind direction indicators and engineered cyclical time features. The forecasting target is the \texttt{pm2.5} concentration channel. The same 70/15/15 split is applied.
-
-\textbf{Foreign Exchange (FX).} The FX dataset~\cite{fx_dataset} contains 5,978 daily exchange rate records from January 1995 to May 2018, covering 42 currency pairs all quoted against the US Dollar. The forecasting target is the Singapore Dollar. Unlike the two standard benchmark datasets above, the FX dataset is selected specifically because global currency pairs share strong cross-channel correlations driven by common macroeconomic factors, providing a challenging setting for the Channel-Independent PatchTST architecture. The same 70/15/15 split is applied.
-
-\subsection{Preprocessing}
-
-All three datasets follow the same preprocessing pipeline used for ETTh1. The data is split strictly in chronological order with no shuffling. The validation and test windows are shifted back by $L{=}336$ steps to allow a full lookback for the first prediction. Standardization (zero mean, unit variance) is computed on the training portion only and applied to the full dataset, preventing any leakage of future statistics into training. Temporal features (hour-of-day, day-of-week, day-of-month, day-of-year) are extracted from the date column and normalized to $[-0.5, 0.5]$.
+Chronological 70/15/15 splits; train-only z-score; calendar features to $[-0.5,0.5]$. \textbf{Traffic}~\cite{traffic_dataset}: 20 channels, target \texttt{traffic\_volume}. \textbf{Air}~\cite{air_dataset}: 16 channels, target \texttt{pm2.5}. \textbf{FX}~\cite{fx_dataset}: 42 USD-quoted pairs, target SGD---stress-test for CI.
 
 \subsection{Results}
 
-The evaluation results across the additional datasets cleanly highlight the resilience of the Channel-Independent architecture. PatchTST and PatchTST (ACCA) strongly outperformed both DLinear and Autoformer on all three datasets (Traffic, Air Quality, FX). The absolute performance gap is especially stark for Autoformer, which struggled to generalize with the limited small-dataset configurations used.
+PatchTST (with ACCA in the table) beats DLinear/Autoformer on all three; Autoformer lags most, consistent with limited data under this config.
 
 \begin{table}[h]
 \centering
@@ -270,7 +237,7 @@ Three limitations scope these conclusions. All runs use a single horizon ($H{=}9
 \section{Conclusion}
 % ============================================================
 
-This project reproduced PatchTST from first principles in PyTorch and validated the implementation against the paper's reported results on ETTh1. Our reproduction achieves within 2\% of the paper's MSE for PatchTST and DLinear, confirming the correctness of our implementation. During reproduction, we identified and documented four discrepancies between the paper and the authors' reference code: the unconditional padding scheme in the patching formula, the substitution of instance normalization with learned RevIN, a dropout rate discrepancy between the paper text and training scripts, and a doubled dropout on the attention output path. We corrected all four in our implementation to faithfully match the paper's description.
+We reproduced PatchTST in PyTorch within ${\approx}2\%$ MSE of the paper on ETTh1 (PatchTST/DLinear) and reconciled four paper-vs.-code issues as in Section~3.
 
 We further proposed and implemented the Adaptive Cross-Channel Attention (ACCA) module and ran a 14-run ablation across ETTh1, Traffic, Air, and FX varying the mixing operator, placement, and gate mode. The learned gate converges to $\alpha_{\text{effective}} \in [0.0098, 0.0132]$ on every run---actively choosing to stay closed. The linear variant ties the CI baseline to $\pm 0.4\%$ MSE everywhere; the attention variant, despite the nearly-closed gate, worsens MSE by $+2.3\%$ on Traffic, $+7.5\%$ on FX, and $+10.1\%$ on Air through gradient noise absorbed by its extra parameters. Forcing the gate open (\texttt{fixed\_one}) catastrophically degrades both variants, with damage that scales with channel count ($+53.4\%$ on ETTh1 up to $+243.7\%$ on FX). These findings strengthen the original authors' CI claim---ACCA does not just fail to help, it can actively hurt---and indicate that a surgical late-stage mixer cannot substitute for the backbone redesigns of Crossformer~\cite{crossformer}, iTransformer~\cite{itransformer}, and TSMixer~\cite{tsmixer}. The final $\alpha_{\text{effective}}$ nevertheless serves as a cheap scalar diagnostic for whether a given dataset benefits from cross-channel context.
 
