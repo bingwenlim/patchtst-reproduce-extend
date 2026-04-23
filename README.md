@@ -3,15 +3,12 @@ Replication and extension of PatchTST by Group 23 for DSA5106.
 
 ## Extending PatchTST with ACCA
 
-This repository extends the original Channel Independent PatchTST architecture with **Adaptive Cross-Channel Attention (ACCA)** module. The ACCA module enables the model to explicitly model cross-channel (inter-variable) temporal dynamics by blending the representations of different specific channels back into the standard representation via a learned gating scalar `alpha`.
+This repository extends the original Channel Independent PatchTST architecture with an **Adaptive Cross-Channel Attention (ACCA)** module. ACCA is inserted after the Transformer encoder and before the prediction head. It mixes the per-channel patch representations with a linear map across the channel axis, then blends the mixed signal back into the original representation via a learned sigmoid gate `alpha`. The gate is initialized to `sigmoid(-4.6) ~= 0.01`, so the model starts as a faithful copy of PatchTST and can open the cross-channel pathway through gradient descent if it is useful.
 
 ### ACCA Configuration
 
-The ACCA module is configurable via the CLI:
-*   `--use_acca`: Enables the Adaptive Cross-Channel Attention module.
-*   `--acca_type`: Type of relation modeling across channels. Can be `attention` (Multi-Head) or `linear`. Default: `attention`.
-*   `--acca_placement`: Injection placement relative to the final model prediction head. Options are `pre_head` or `post_head`. Default: `pre_head`.
-*   `--alpha_mode`: Governs how the alpha blending gate works. `learned` computes grads via backprop, `fixed_zero` (baseline PatchTST logic), `fixed_one` (full overwrite). Default: `learned`.
+*   `--use_acca`: Enable the ACCA module.
+*   `--alpha_init`: Initial value of the raw alpha gate. Default: `-4.6` (`sigmoid(-4.6) ~= 0.01`).
 
 ```bash
 uv run python train.py \
@@ -21,8 +18,7 @@ uv run python train.py \
   --n_heads 4 \
   --d_ff 128 \
   --dropout 0.3 \
-  --use_acca \
-  --acca_type linear
+  --use_acca
 ```
 
 This configuration achieves Test MSE: `0.3813` and Test MAE: `0.4031`.

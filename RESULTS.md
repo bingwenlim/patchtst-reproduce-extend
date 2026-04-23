@@ -1,5 +1,7 @@
 # Reproduction Results
 
+All timing columns are wall-clock. `Train Time` is the total training time reported by `run_training` as `total_training_time` (including early stopping). `Inference Time` is `test_inference_time`: the wall-clock time to run the best-epoch model over the full test loader on the same device. Both are printed by `train.py` in the final summary and captured by `scripts/run_benchmarks.py`.
+
 ## ETTh1 (pred_len=96)
 
 ### Summary
@@ -7,16 +9,16 @@
 | Model           | Config           | MSE (Paper) | MSE (Reproduced) | MAE (Paper) | MAE (Reproduced) | Best Epoch | Time        |
 | --------------- | ---------------- | ----------- | ---------- | ----------- | ---------- | ---------- | ----------- |
 | PatchTST        | ETTh1            | 0.375       | 0.381      | 0.399       | 0.403      | 37         | 196s (MPS)  |
-| PatchTST (ACCA) | ETTh1 (linear)   | ‚Ä?          | 0.381      | ‚Ä?          | 0.403      | 37         | 169s (MPS)  |
-| PatchTST (ACCA) | default (linear) | ‚Ä?          | 0.377      | ‚Ä?          | 0.399      | 3          | 225s (MPS)  |
+| PatchTST (ACCA) | ETTh1 (linear)   | ù?          | 0.381      | ù?          | 0.403      | 37         | 169s (MPS)  |
+| PatchTST (ACCA) | default (linear) | ù?          | 0.377      | ù?          | 0.399      | 3          | 225s (MPS)  |
 | DLinear         | default          | 0.375       | 0.374      | 0.399       | 0.397      | 43         | 9s (MPS)    |
 | Autoformer      | default          | 0.435       | 0.528      | 0.446       | 0.491      | 6          | 1205s (MPS) |
-| Autoformer      | ETTh1            | ‚Ä?          | 0.684      | ‚Ä?          | 0.556      | 11         | 146s (MPS)  |
+| Autoformer      | ETTh1            | ù?          | 0.684      | ù?          | 0.556      | 11         | 146s (MPS)  |
 
 ### Experiment configs
 
-1) **ETTh1** ‚Ä?PatchTST's paper config for small datasets: `--d_model 16 --n_heads 4 --d_ff 128 --dropout 0.3`
-2) **default** ‚Ä?the baseline implementation configuration (paper general defaults): d_model=128, n_heads=16, e_layers=3, d_ff=256, dropout=0.2, seq_len=336
+1) **ETTh1** ù?PatchTST's paper config for small datasets: `--d_model 16 --n_heads 4 --d_ff 128 --dropout 0.3`
+2) **default** ù?the baseline implementation configuration (paper general defaults): d_model=128, n_heads=16, e_layers=3, d_ff=256, dropout=0.2, seq_len=336
 
 All runs share: lr=1e-4, batch_size=128, epochs=100, patience=10, seed=42, type3 LR schedule.
 
@@ -74,7 +76,7 @@ Notes:
 uv run python train.py --model DLinear
 ```
 
-DLinear only uses seq_len, pred_len, enc_in, and moving_avg from configs ‚Ä?model-specific hyperparameters don't apply.
+DLinear only uses seq_len, pred_len, enc_in, and moving_avg from configs ù?model-specific hyperparameters don't apply.
 
 ### Autoformer
 
@@ -131,7 +133,6 @@ The paper's 0.435 was obtained by running Autoformer across 6 different seq_len 
 | PatchTST (ACCA linear, pre)  | **fixed_one**            | 0.3059 | 0.3673 | 67         | 839.4074s  |
 | DLinear                      | default                  | 0.155  | 0.260  | 47         | 8.4s       |
 | Autoformer                   | paper config             | 0.166  | 0.287  | 65         | 238.8s     |
-
 
 ## ACCA full ablation (pred_len=96)
 

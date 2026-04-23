@@ -1,5 +1,5 @@
 {
-  "timestamp": "2026-04-21 02:43:28",
+  "timestamp": "2026-04-23 01:21:20",
   "results": [
     {
       "dataset": "traffic",
@@ -7,15 +7,17 @@
       "test_mse": "0.5306",
       "test_mae": "0.4608",
       "best_epoch": "58",
-      "time": "2962.6s"
+      "time": "2846.3s",
+      "inference_time": "2.307s"
     },
     {
       "dataset": "traffic",
-      "model": "PatchTST (ACCA linear)",
-      "test_mse": "0.5301",
-      "test_mae": "0.4602",
-      "best_epoch": "58",
-      "time": "3051.2s"
+      "model": "PatchTST (ACCA)",
+      "test_mse": "0.5307",
+      "test_mae": "0.4609",
+      "best_epoch": "52",
+      "time": "2842.0s",
+      "inference_time": "2.752s"
     },
     {
       "dataset": "traffic",
@@ -23,7 +25,8 @@
       "test_mse": "0.5806",
       "test_mae": "0.5168",
       "best_epoch": "15",
-      "time": "20.5s"
+      "time": "24.6s",
+      "inference_time": "0.131s"
     },
     {
       "dataset": "traffic",
@@ -31,7 +34,8 @@
       "test_mse": "0.6851",
       "test_mae": "0.5390",
       "best_epoch": "10",
-      "time": "526.3s"
+      "time": "522.5s",
+      "inference_time": "0.809s"
     },
     {
       "dataset": "air",
@@ -39,15 +43,17 @@
       "test_mse": "0.2216",
       "test_mae": "0.2017",
       "best_epoch": "50",
-      "time": "1668.3s"
+      "time": "1828.0s",
+      "inference_time": "1.602s"
     },
     {
       "dataset": "air",
-      "model": "PatchTST (ACCA linear)",
-      "test_mse": "0.2214",
-      "test_mae": "0.2014",
-      "best_epoch": "50",
-      "time": "1731.5s"
+      "model": "PatchTST (ACCA)",
+      "test_mse": "0.2212",
+      "test_mae": "0.2010",
+      "best_epoch": "47",
+      "time": "1794.4s",
+      "inference_time": "1.907s"
     },
     {
       "dataset": "air",
@@ -55,7 +61,8 @@
       "test_mse": "0.2781",
       "test_mae": "0.2887",
       "best_epoch": "11",
-      "time": "11.7s"
+      "time": "13.7s",
+      "inference_time": "0.115s"
     },
     {
       "dataset": "air",
@@ -63,7 +70,8 @@
       "test_mse": "0.4036",
       "test_mae": "0.3374",
       "best_epoch": "9",
-      "time": "429.9s"
+      "time": "428.8s",
+      "inference_time": "0.955s"
     },
     {
       "dataset": "fx",
@@ -71,15 +79,17 @@
       "test_mse": "0.0889",
       "test_mae": "0.1848",
       "best_epoch": "88",
-      "time": "934.2s"
+      "time": "1047.0s",
+      "inference_time": "0.549s"
     },
     {
       "dataset": "fx",
-      "model": "PatchTST (ACCA linear)",
-      "test_mse": "0.0891",
-      "test_mae": "0.1850",
-      "best_epoch": "88",
-      "time": "981.6s"
+      "model": "PatchTST (ACCA)",
+      "test_mse": "0.0890",
+      "test_mae": "0.1849",
+      "best_epoch": "89",
+      "time": "1044.8s",
+      "inference_time": "0.542s"
     },
     {
       "dataset": "fx",
@@ -87,7 +97,8 @@
       "test_mse": "0.1555",
       "test_mae": "0.2596",
       "best_epoch": "47",
-      "time": "8.4s"
+      "time": "8.1s",
+      "inference_time": "0.025s"
     },
     {
       "dataset": "fx",
@@ -95,7 +106,8 @@
       "test_mse": "0.1657",
       "test_mae": "0.2867",
       "best_epoch": "65",
-      "time": "238.8s"
+      "time": "238.0s",
+      "inference_time": "0.104s"
     }
   ]
 }
