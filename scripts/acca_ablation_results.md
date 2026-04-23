@@ -5,11 +5,13 @@ Generated: 2026-04-23 18:10:27
 Each row is a `PatchTST --use_acca` run with the paper's ETTh1 config (`--d_model 16 --n_heads 4 --d_ff 128 --dropout 0.3`). `name` is the `--run_name` slug; the per-epoch alpha/MSE trace lives at `scripts/traces/<name>_trace.json`.
 
 > **Note.** The 14 runs were executed in two batches. ETTh1 rows are the
-> first batch (finished 2026-04-22) and their per-epoch traces are in
+> first batch (finished 2026-04-22); their full per-epoch traces live in
 > `scripts/traces/`. Traffic / Air / FX rows are the second batch (finished
-> 2026-04-23); their summary numbers were transcribed here verbatim from
-> that batch's own `acca_ablation_results.md`, but their raw per-epoch
-> trace JSONs are not checked in.
+> 2026-04-23); their `scripts/traces/<name>_trace.json` files carry only
+> the `run_name` / `config` / `summary` blocks transcribed verbatim from
+> the originals (with `per_epoch: []`), and the aggregate numbers in this
+> file and `acca_ablation_results.json` come from the second batch's own
+> aggregate output.
 
 ## ETTh1
 
@@ -39,7 +41,7 @@ Each row is a `PatchTST --use_acca` run with the paper's ETTh1 config (`--d_mode
 
 | Run | Test MSE | Test MAE | Best Epoch | alpha_raw | alpha_eff | Time |
 | --- | --- | --- | --- | --- | --- | --- |
-| `acca_attn_pre_learned_fx` | 0.0957 | 0.1928 | 86 | -4.6116 | 0.0098 | 1568.5886s |
+| `acca_attn_pre_learned_fx` | 0.0957 | 0.1928 | 86 | -4.6116 | 0.0098 | 1568.5006s |
 | `acca_attn_post_learned_fx` | 0.0958 | 0.1930 | 69 | -4.6134 | 0.0098 | 846.5207s |
 | `acca_lin_post_learned_fx` | 0.0962 | 0.1933 | 83 | -4.5886 | 0.0101 | 981.2979s |
 | `acca_atte_pre_fixedone_fx` | 0.1183 | 0.2211 | 73 | inf | 1.0000 | 1352.0344s |

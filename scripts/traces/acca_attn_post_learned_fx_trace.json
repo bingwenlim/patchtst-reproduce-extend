@@ -1,0 +1,35 @@
+{
+  "run_name": "acca_attn_post_learned_fx",
+  "note": "Per-epoch trace data is not checked in; see scripts/acca_ablation_results.{json,md} for this run's summary metrics. config / summary blocks below are transcribed verbatim from the second batch's own trace JSON.",
+  "config": {
+    "model": "PatchTST",
+    "dataset": "fx",
+    "seq_len": 336,
+    "pred_len": 96,
+    "d_model": 16,
+    "n_heads": 4,
+    "e_layers": 3,
+    "d_ff": 128,
+    "dropout": 0.3,
+    "use_acca": true,
+    "acca_type": "attention",
+    "acca_placement": "post_head",
+    "alpha_mode": "learned",
+    "alpha_init": -4.6,
+    "seed": 42
+  },
+  "summary": {
+    "model": "PatchTST",
+    "dataset": "fx",
+    "best_epoch": 69,
+    "best_val_mse": 0.08234585076570511,
+    "best_val_mae": 0.15702024102210999,
+    "test_mse": 0.09577333182096481,
+    "test_mae": 0.1930483728647232,
+    "total_training_time": 846.5207390785217,
+    "test_inference_time": 0.4975619316101074,
+    "final_alpha_raw": -4.613405227661133,
+    "final_alpha_effective": 0.009820586070418358
+  },
+  "per_epoch": []
+}

@@ -1,0 +1,35 @@
+{
+  "run_name": "acca_attn_pre_learned_air",
+  "note": "Per-epoch trace data is not checked in; see scripts/acca_ablation_results.{json,md} for this run's summary metrics. config / summary blocks below are transcribed verbatim from the second batch's own trace JSON.",
+  "config": {
+    "model": "PatchTST",
+    "dataset": "air",
+    "seq_len": 336,
+    "pred_len": 96,
+    "d_model": 16,
+    "n_heads": 4,
+    "e_layers": 3,
+    "d_ff": 128,
+    "dropout": 0.3,
+    "use_acca": true,
+    "acca_type": "attention",
+    "acca_placement": "pre_head",
+    "alpha_mode": "learned",
+    "alpha_init": -4.6,
+    "seed": 42
+  },
+  "summary": {
+    "model": "PatchTST",
+    "dataset": "air",
+    "best_epoch": 39,
+    "best_val_mse": 0.3218670189380646,
+    "best_val_mae": 0.25254523754119873,
+    "test_mse": 0.24443747103214264,
+    "test_mae": 0.23074722290039062,
+    "total_training_time": 1612.2696590423584,
+    "test_inference_time": 1.7280371189117432,
+    "final_alpha_raw": -4.421474456787109,
+    "final_alpha_effective": 0.01187381986528635
+  },
+  "per_epoch": []
+}

@@ -1,0 +1,35 @@
+{
+  "run_name": "acca_attn_post_learned_traffic",
+  "note": "Per-epoch trace data is not checked in; see scripts/acca_ablation_results.{json,md} for this run's summary metrics. config / summary blocks below are transcribed verbatim from the second batch's own trace JSON.",
+  "config": {
+    "model": "PatchTST",
+    "dataset": "traffic",
+    "seq_len": 336,
+    "pred_len": 96,
+    "d_model": 16,
+    "n_heads": 4,
+    "e_layers": 3,
+    "d_ff": 128,
+    "dropout": 0.3,
+    "use_acca": true,
+    "acca_type": "attention",
+    "acca_placement": "post_head",
+    "alpha_mode": "learned",
+    "alpha_init": -4.6,
+    "seed": 42
+  },
+  "summary": {
+    "model": "PatchTST",
+    "dataset": "traffic",
+    "best_epoch": 49,
+    "best_val_mse": 0.5272804498672485,
+    "best_val_mae": 0.45689064264297485,
+    "test_mse": 0.5425346493721008,
+    "test_mae": 0.46115508675575256,
+    "total_training_time": 2276.2533411979675,
+    "test_inference_time": 1.9654326438903809,
+    "final_alpha_raw": -4.31464147567749,
+    "final_alpha_effective": 0.013194909319281578
+  },
+  "per_epoch": []
+}

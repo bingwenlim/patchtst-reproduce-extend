@@ -57,12 +57,14 @@ def plot_alpha_trace(traces, out_path):
 
     fig, ax = plt.subplots(figsize=(7.5, 4.2))
     # Deterministic colour assignment keyed by run name so the figure is
-    # reproducible even when traces are added incrementally.
+    # reproducible even when traces are added incrementally. Runs with an
+    # empty per_epoch array (e.g. the second-batch stubs) are silently
+    # skipped to avoid ghost legend entries.
     for name in sorted(acca_traces):
         trace = acca_traces[name]
         epochs = [p["epoch"] for p in trace["per_epoch"]]
         alpha = [p["alpha_effective"] for p in trace["per_epoch"]]
-        if any(a is None for a in alpha):
+        if not epochs or any(a is None for a in alpha):
             continue
         style = "--" if "fixedone" in name else "-"
         ax.plot(epochs, alpha, style, label=name, linewidth=1.4, alpha=0.85)

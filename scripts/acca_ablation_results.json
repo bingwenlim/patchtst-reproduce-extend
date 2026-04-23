@@ -1,6 +1,6 @@
 {
   "timestamp": "2026-04-23 18:10:27",
-  "note": "The 14 runs were executed in two batches. ETTh1 rows are the first batch (finished 2026-04-22) and their per-epoch traces are in scripts/traces/. Traffic / Air / FX rows are the second batch (finished 2026-04-23); their summary numbers are transcribed here verbatim from that batch's own acca_ablation_results.json, and their raw per-epoch trace JSONs are not checked in.",
+  "note": "The 14 runs were executed in two batches. ETTh1 rows are the first batch (finished 2026-04-22) and their full per-epoch traces live in scripts/traces/. Traffic / Air / FX rows are the second batch (finished 2026-04-23); their scripts/traces/<name>_trace.json files carry only the run_name / config / summary blocks transcribed verbatim from the originals (per_epoch is an empty array for those runs), and the aggregate numbers in this file come from the second batch's own aggregate output.",
   "results": [
     {
       "name": "acca_attn_pre_learned_ETTh1",
@@ -86,7 +86,7 @@
       "test_mse": "0.0957",
       "test_mae": "0.1928",
       "best_epoch": "86",
-      "total_training_time": "1568.5886",
+      "total_training_time": "1568.5006",
       "final_alpha_raw": "-4.6116",
       "final_alpha_effective": "0.0098"
     },

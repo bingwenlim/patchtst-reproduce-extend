@@ -1,0 +1,35 @@
+{
+  "run_name": "acca_atte_pre_fixedone_fx",
+  "note": "Per-epoch trace data is not checked in; see scripts/acca_ablation_results.{json,md} for this run's summary metrics. config / summary blocks below are transcribed verbatim from the second batch's own trace JSON. final_alpha_raw serializes as the string 'Infinity' because alpha_mode=fixed_one registers the gate as a +inf buffer.",
+  "config": {
+    "model": "PatchTST",
+    "dataset": "fx",
+    "seq_len": 336,
+    "pred_len": 96,
+    "d_model": 16,
+    "n_heads": 4,
+    "e_layers": 3,
+    "d_ff": 128,
+    "dropout": 0.3,
+    "use_acca": true,
+    "acca_type": "attention",
+    "acca_placement": "pre_head",
+    "alpha_mode": "fixed_one",
+    "alpha_init": -4.6,
+    "seed": 42
+  },
+  "summary": {
+    "model": "PatchTST",
+    "dataset": "fx",
+    "best_epoch": 73,
+    "best_val_mse": 0.10506543517112732,
+    "best_val_mae": 0.1799565702676773,
+    "test_mse": 0.11825592815876007,
+    "test_mae": 0.22112764418125153,
+    "total_training_time": 1352.0343618392944,
+    "test_inference_time": 1.0285580158233643,
+    "final_alpha_raw": "Infinity",
+    "final_alpha_effective": 1.0
+  },
+  "per_epoch": []
+}
