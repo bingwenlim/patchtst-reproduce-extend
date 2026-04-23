@@ -141,12 +141,7 @@ def run_training(
     seed=42,
     num_workers=0,
     use_acca=False,
-    alpha_mode="learned",
-    acca_type="attention",
-    acca_placement="pre_head",
-    acca_n_heads=16,
     alpha_init=-4.6,
-    freeze_backbone_epochs=0,
 ):
     set_seed(seed)
 
@@ -181,12 +176,7 @@ def run_training(
         patch_len=patch_len,
         stride=stride,
         use_acca=use_acca,
-        alpha_mode=alpha_mode,
-        acca_type=acca_type,
-        acca_placement=acca_placement,
-        acca_n_heads=acca_n_heads,
         alpha_init=alpha_init,
-        freeze_backbone_epochs=freeze_backbone_epochs,
     )
 
     train_loader = DataLoader(
@@ -231,16 +221,6 @@ def run_training(
     total_train_start = time.time()
 
     for epoch in range(epochs):
-        # 2-stage training: freeze/unfreeze backbone
-        if configs.freeze_backbone_epochs > 0:
-            freeze = epoch < configs.freeze_backbone_epochs
-            if hasattr(model, 'patch_embedding'):
-                for param in model.patch_embedding.parameters():
-                    param.requires_grad = not freeze
-            if hasattr(model, 'encoder'):
-                for param in model.encoder.parameters():
-                    param.requires_grad = not freeze
-
         current_lr = adjust_learning_rate(optimizer, epoch, lr)
         epoch_start = time.time()
 
@@ -345,14 +325,11 @@ def parse_args():
     parser.add_argument("--num_workers", type=int, default=0)
     
     # ACCA arguments
-    parser.add_argument("--use_acca", action="store_true")
-    parser.add_argument("--alpha_mode", type=str, default="learned")
-    parser.add_argument("--acca_type", type=str, default="attention", choices=["attention", "linear"])
-    parser.add_argument("--acca_placement", type=str, default="pre_head", choices=["pre_head", "post_head"])
-    parser.add_argument("--acca_n_heads", type=int, default=16)
-    parser.add_argument("--alpha_init", type=float, default=-4.6)
-    parser.add_argument("--freeze_backbone_epochs", type=int, default=0)
-    
+    parser.add_argument("--use_acca", action="store_true",
+                        help="Enable the Adaptive Cross-Channel Attention module.")
+    parser.add_argument("--alpha_init", type=float, default=-4.6,
+                        help="Initial value of the raw alpha gate (sigmoid(-4.6) ~= 0.01).")
+
     return parser.parse_args()
 
 
@@ -379,10 +356,5 @@ if __name__ == "__main__":
         seed=args.seed,
         num_workers=args.num_workers,
         use_acca=args.use_acca,
-        alpha_mode=args.alpha_mode,
-        acca_type=args.acca_type,
-        acca_placement=args.acca_placement,
-        acca_n_heads=args.acca_n_heads,
         alpha_init=args.alpha_init,
-        freeze_backbone_epochs=args.freeze_backbone_epochs,
     )

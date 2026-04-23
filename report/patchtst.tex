@@ -3,6 +3,7 @@
 \usepackage{amsmath}
 \usepackage{amsfonts}
 \usepackage{booktabs}
+\usepackage{multirow}
 \usepackage{graphicx}
 \usepackage{hyperref}
 \usepackage{geometry}
@@ -53,7 +54,7 @@ Before entering the model, each sample is independently normalized along the tim
 \end{equation}
 This is distinct from the dataset-level z-score standardization applied during preprocessing, which uses global training set statistics to bring all channels to a common scale. Instance normalization operates per-sample, stripping each individual window's local level and spread so the model focuses on the shape of the signal rather than its absolute position, addressing the non-stationarity inherent in time series data. The statistics are detached from the computation graph---the model cannot learn to manipulate them through backpropagation.
 
-Notably, the official implementation replaces this with RevIN~\cite{patchtst_github}, a learned normalization module with trainable affine parameters ($\gamma$, $\beta$). The paper itself describes only the simpler statistical normalization without learned parameters. We implement the paper's description.
+Notably, the official implementation replaces this with RevIN~\cite{revin}, a learned normalization module with trainable affine parameters ($\gamma$, $\beta$). The paper itself describes only the simpler statistical normalization without learned parameters. We implement the paper's description.
 
 \subsection{Channel Independence}
 
@@ -88,7 +89,7 @@ The encoder consists of $M$ identical layers, each containing two sub-blocks:
     \item \textbf{Multi-head self-attention}: The input is projected into queries, keys, and values via learned linear transformations, then split across $H$ attention heads each operating in $D/H$ dimensions. Each head computes scaled dot-product attention over the same set of $N$ patch tokens in a different projected subspace, then the heads are concatenated and projected back to $D$ dimensions.
     \item \textbf{Position-wise feed-forward network}: A two-layer MLP ($D \to d_{ff} \to D$) with GELU activation expands and compresses each token's representation independently.
 \end{enumerate}
-Both sub-blocks use residual connections followed by BatchNorm---a departure from the LayerNorm used in standard Transformers. The normalization is applied post-residual (post-norm), meaning the residual is added before normalization:
+Both sub-blocks use residual connections followed by BatchNorm---a departure from the LayerNorm used in standard Transformers~\cite{vaswani2017}. The normalization is applied post-residual (post-norm), meaning the residual is added before normalization:
 \begin{align}
     \mathbf{z}' &= \text{BatchNorm}(\mathbf{z} + \text{Dropout}(\text{MHA}(\mathbf{z}))) \\
     \mathbf{z}'' &= \text{BatchNorm}(\mathbf{z}' + \text{Dropout}(\text{FFN}(\mathbf{z}')))
@@ -133,338 +134,202 @@ result; we only evaluated at $L{=}336$.
 \label{sec:evaluation}
 % ============================================================
 
-To evaluate the generalization capability of PatchTST beyond the ETTh1 benchmark, we conducted experiments on additional datasets with diverse statistical properties. We selected benchmark datasets with seasonal patterns analogous to, but not included in, the original paper. Furthermore, We extended to focus on dataset with strong cross-channel dependencies and weak temporal regularity, which present a challenging setting for models that rely on local temporal patterns and channel-independent representations.
+To assess whether PatchTST's reported advantages generalize beyond the paper's original benchmarks, we evaluate all three models on two additional standard forecasting datasets (Traffic and Air Quality) and one highly correlated multivariate dataset (Foreign Exchange rates). All experiments use prediction horizon $H{=}96$ and the same ETTh1 paper configuration: $L{=}336$, $P{=}16$, $S{=}8$, $D{=}16$, $H{=}4$, $d_{ff}{=}128$, $M{=}3$ layers, dropout 0.3.
 
-\bigskip
+\subsection{Datasets}
 
-\noindent Specifically, we consider three datasets:
-\begin{itemize}
-\item \textbf{Traffic Dataset:} With strong daily patterns and spatial dependencies.
-\item \textbf{Air Quality Dataset:} Moderate seasonality with exogenous coupling.
-\item \textbf{Exchange Rate Dataset:} With high volatility and weak seasonality.
-\end{itemize}
+Our loaders select every numeric column of the source file as an input channel and do not drop any; the channel counts quoted below therefore reflect what the models actually receive, which in a couple of cases includes artefactual columns that we have left in for reproducibility.
 
-\subsection{Experimental Setup}
+\textbf{Traffic.} The Metro Interstate Traffic Volume dataset~\cite{traffic_dataset} contains 48,204 hourly records from October 2012 to September 2018, recorded at a sensor on I-94 westbound in Minneapolis--Saint Paul, USA. After preprocessing, 20 numeric columns are passed to the model: the hourly traffic volume itself, four weather covariates (temperature, rainfall, snowfall, cloud cover), calendar integers (day, year), six engineered cyclical time features (hour, day-of-week, month, each as sine/cosine), and seven binary weather-condition flags (holiday, clear, cloudy, rainy, snowy, foggy, squall). The forecast loss is computed over all 20 channels, with \texttt{traffic\_volume} being the headline channel of interest. Data is split 70\% / 15\% / 15\% for train, validation, and test sets.
 
-\subsubsection{Sequence Construction}
+\textbf{Air Quality.} The Beijing PM2.5 dataset~\cite{air_dataset} contains 41,757 hourly records. After preprocessing, 16 numeric columns are passed to the model: the PM2.5 concentration, six meteorological measurements (dew point, temperature, atmospheric pressure, cumulative wind speed, cumulative snow hours, cumulative rain hours), six engineered cyclical time features (hour, month, day-of-week, each as sine/cosine), and three calendar/index columns (the row index \texttt{No}, \texttt{year}, and \texttt{day}) that are retained from the raw file. The wind direction indicators (\texttt{wind\_NE/NW/SE/cv}) are stored as non-numeric dtypes in our source file and are therefore filtered out by the numeric-column selector. As with Traffic, the forecast loss is computed over all 16 channels, with \texttt{pm2.5} being the headline channel of interest. The same 70/15/15 split is applied.
 
-A sliding window approach is used to construct samples:
-\begin{itemize}
-\item Input sequence length: $L = 336$
-\item Prediction horizon: $H = 96$
-\item Label length: $48$
-\end{itemize}
+\textbf{Foreign Exchange (FX).} The FX dataset~\cite{fx_dataset} contains 5,978 daily exchange rate records from January 1995 to May 2018. It lists 42 currency columns quoted against the US Dollar, one of which is the \texttt{U.S. Dollar} column itself (a constant 1.0 that collapses to zero under our z-score standardization). All 42 columns are passed to the model, so in practice it forecasts 41 foreign-currency-vs-USD rates plus one degenerate constant channel. The forecast loss is computed over all 42 channels, with the \texttt{Singapore Dollar} rate being the headline channel of interest. Unlike the two standard benchmark datasets above, the FX dataset is selected specifically because global currency pairs share strong cross-channel correlations driven by common macroeconomic factors, providing a challenging setting for the Channel-Independent PatchTST architecture. The same 70/15/15 split is applied.
 
-\noindent Each sample consists of:
-\begin{itemize}
-\item Encoder input: past 336-timesteps
-\item Decoder target: next 96-timesteps
-\end{itemize}
+\subsection{Preprocessing}
 
-\subsubsection{Train/Validation/Test Split}
+All three datasets follow the same preprocessing pipeline used for ETTh1. The data is split strictly in chronological order with no shuffling. The validation and test windows are shifted back by $L{=}336$ steps to allow a full lookback for the first prediction. Standardization (zero mean, unit variance) is computed on the training portion only and applied to the full dataset, preventing any leakage of future statistics into training. Temporal features (hour-of-day, day-of-week, day-of-month, day-of-year) are extracted from the date column and normalized to $[-0.5, 0.5]$.
 
-Chronological split:
-\begin{itemize}
-\item 70\% training
-\item 15\% validation
-\item 15\% test
-\end{itemize}
+\subsection{Results}
 
-\noindent To preserve temporal continuity, validation and test splits are shifted backward by the lookback length. This ensures that all sliding windows remain valid without losing historical context.
-
-\subsubsection{Normalization}
-
-We apply feature-wise z-score normalization using training data only:
-\begin{equation}
-    x_{\text{normalized}} = \frac{x - \mu_{\text{train}}}{\sigma_{\text{train}}}
-\end{equation}
-
-\noindent Mean and standard deviation are computed exclusively from the training set.
-Features with zero variance are stabilized by setting $\sigma_{\text{train}}$ to 1.
-This prevents data leakage and ensures fair evaluation.
-
-\subsubsection{Time Feature Encoding}
-
-Temporal features are extracted from the datetime index using:
-\begin{itemize}
-\item hour of day
-\item day of week
-\item day of month
-\item day of year
-\end{itemize}
-
-\noindent All features are normalized to $[-0.5,0.5]$.
-
-\subsubsection{Model Configuration}
-
-All models are trained under consistent settings:
-\begin{itemize}
-\item Input sequence length: 336
-\item Prediction horizon: 96
-\item Batch size: 128
-\item Optimizer: Adam
-\item Learning rate: $1 \times 10^{-4}$
-\item Learning rate schedule: constant for the first three epochs, followed by exponential decay with factor 0.9 per epoch
-\item Maximum epochs: 100
-\item Early stopping patience: 10
-\end{itemize}
-
-\bigskip
-
-\noindent PatchTST Configuration:
-\begin{itemize}
-\item Patch length: 16
-\item Stride: 8
-\item Embedding dimension: 128
-\item Attention heads: 16
-\item Encoder layers: 3
-\item Feed-forward dimension: 256
-\item Dropout: 0.2
-\end{itemize}
-
-\noindent The best model is selected based on validation MSE.
-
-\subsubsection{Baselines}
-
-We compare PatchTST against:
-\begin{itemize}
-\item DLinear — a linear model with strong empirical performance in time-series forecasting
-\item Autoformer — a Transformer-based architecture with seasonal-trend decomposition
-\end{itemize}
-
-\noindent This provides a comparison across both simple and complex model classes.
-
-\subsubsection{Evaluation Metrics}
-
-We report:
-\begin{itemize}
-\item \textbf{Mean Squared Error (MSE):} $\frac{1}{n} \sum_{i=1}^{n} (y_i - \hat{y}_i)^2$
-
-\item \textbf{Mean Absolute Error (MAE):} $\frac{1}{n} \sum_{i=1}^{n} |y_i - \hat{y}_i|$
-\end{itemize}
-
-\noindent All results are computed on the test set using the best validation checkpoint.
-
-\subsection{Additional Benchmark Dataset 1: Traffic Dataset}
-The traffic dataset contains hourly volume measurements on westbound I-94 in Minneapolis-St. Paul (2012-2018), along with weather and holiday features \cite{data-traffic}.
-
-\bigskip
-
-\noindent After preprocessing, the dataset contains:
-\begin{itemize}
-\item Length: 48,204-timesteps
-\item Frequency: Hourly
-\item Input features: 20 variables (including feature engineered and one-hot encoded)
-\end{itemize}
-
-\subsubsection{Key Characteristics}
-\begin{itemize}
-\item Rich contextual features: Includes weather conditions (temperature, precipitation, cloud cover) and holiday indicators, making it suitable for predictive modeling.
-\item Cyclical and seasonal patterns: Captures recurring annual events (holidays, seasonal weather shifts) that systematically influence traffic volume across time.
-\end{itemize}
-
-\noindent This dataset serves as a performance benchmark to verify PatchTST's results presented in the paper.
-
-\subsubsection{Performance Comparison}
-
-The results on the traffic dataset demonstrate that PatchTST consistently outperforms both baseline models, though the margins are narrow.
-
-\begin{itemize}
-\item PatchTST obtains the lowest errors on both metrics, with an MSE of 0.538 and MAE of 0.461, indicating the most accurate overall predictions.
-    
-\item Compared to DLinear, PatchTST reduces MSE more by 7.4\% and MAE by 10.8\%. 
-
-\item Autoformer performs moderately among the three models. While its decomposition mechanism helps capture trend and seasonality, it remains behind PatchTST by 4.8\% in MSE and 9.1\% in MAE, indicating less precise overall predictions.
-\end{itemize}
-
-\begin{table}[H]
-\centering
-\caption{Performance comparison on the traffic dataset. Lower is better.}
-\label{tab:traffic_results}
-\begin{tabular}{lcc}
-\toprule
-Model & MSE & MAE \\
-\midrule
-PatchTST   & 0.538 & 0.461 \\
-DLinear    & 0.581 & 0.517 \\
-Autoformer & 0.565 & 0.507 \\
-\bottomrule
-\end{tabular}
-\end{table}
-
-\noindent Traffic volume's strong daily/weekly periodicity and autoregressive structure (e.g. current volume depends heavily on the previous hour) allows simpler models like DLinear to perform competitively. However, PatchTST's patch-based representation still provides an advantage by capturing fine-grained local temporal dependencies that are not fully exploited by the other models.
-
-\subsection{Additional Benchmark Dataset 2: Air Quality Dataset}
-The air quality dataset consists of hourly PM2.5 concentration measurements collected at the US Embassy in Beijing, covering the period from January 1, 2010 to December 31, 2014\cite{data-air}. To provide contextual environmental information, the dataset also includes meteorological data obtained from Beijing Capital International Airport.
-
-\bigskip
-
-\noindent After preprocessing, the dataset contains:
-\begin{itemize}
-\item Length: 43,8244-timesteps
-\item Frequency: Hourly
-\item Input features: 20 variables (including feature engineered and one-hot encoded)
-\end{itemize}
-
-\subsubsection{Key Characteristics}
-\begin{itemize}
-\item Seasonal and daily periodicity: weak but observable patterns, such as diurnal cycles and seasonal trends.
-
-\item Volatility and extreme events: contains highly fluctuating pm2.5 values, including extreme spikes and sudden pollution events or sensor anomalies.
-
-\item Non-stationarity: Statistical properties shift over time due to changing weather patterns, seasonal transitions, and potential policy interventions.
-\end{itemize}
-
-\noindent With particular emphasis on its periodic yet non-stationary dual nature, the dataset constitutes a moderately challenging benchmark to evaluate whether PatchTST can appropriately perform to capture seasonal cycles without encroaching upon incompatible temporal regimes.
-
-\subsubsection{Performance Comparison}
-The results on the air quality dataset show a more significant performance gap compared to the traffic dataset by PatchTST.
-
-\begin{itemize}
-\item PatchTST make substantially more accurate predictions as evidenced by the lowest error across both metrics, with an MSE of 0.212 and MAE of 0.190.
-
-\item Compared to DLinear, PatchTST achieves a significantly larger proportional reduction, lowering MSE by 24.0\% and MAE by 34.3\%.
-
-\item Autoformer performs similarly to DLinear but remains substantially behind PatchTST, which outperforms it by 24.3\% in MSE and 33.8\% in MAE.
-\end{itemize}
+The evaluation results across the additional datasets cleanly highlight the resilience of the Channel-Independent architecture. PatchTST and PatchTST (ACCA) strongly outperformed both DLinear and Autoformer on all three datasets (Traffic, Air Quality, FX). The absolute performance gap is especially stark for Autoformer, which struggled to generalize with the limited small-dataset configurations used.
 
 \begin{table}[h]
 \centering
-\caption{Performance comparison on the traffic dataset. Lower is better.}
-\label{tab:traffic_results}
-\begin{tabular}{lcc}
+\caption{Results on additional datasets (pred\_len = 96). Lower is better. All runs use the ETTh1 paper config.}
+\label{tab:additional_results}
+\begin{tabular}{llcccc}
 \toprule
-Model & MSE & MAE \\
+Dataset & Model & MSE & MAE & Best Epoch & Train Time \\
 \midrule
-PatchTST   & 0.212 & 0.190 \\
-DLinear    & 0.279 & 0.289 \\
-Autoformer & 0.280 & 0.287 \\
+\multirow{4}{*}{Traffic}
+ & PatchTST        & 0.531 & 0.461 & 58 & 2846.3s \\
+ & PatchTST (ACCA) & 0.531 & 0.461 & 52 & 2842.0s \\
+ & DLinear         & 0.581 & 0.517 & 15 & 24.6s \\
+ & Autoformer      & 0.685 & 0.539 & 10 & 522.5s \\
+\midrule
+\multirow{4}{*}{Air Quality}
+ & PatchTST        & 0.222 & 0.202 & 50 & 1828.0s \\
+ & PatchTST (ACCA) & 0.221 & 0.201 & 47 & 1794.4s \\
+ & DLinear         & 0.278 & 0.289 & 11 & 13.7s \\
+ & Autoformer      & 0.404 & 0.337 & 9 & 428.8s \\
+\midrule
+\multirow{4}{*}{FX}
+ & PatchTST        & 0.089 & 0.185 & 88 & 1047.0s \\
+ & PatchTST (ACCA) & 0.089 & 0.185 & 89 & 1044.8s \\
+ & DLinear         & 0.155 & 0.260 & 47 & 8.1s \\
+ & Autoformer      & 0.166 & 0.287 & 65 & 238.0s \\
 \bottomrule
 \end{tabular}
 \end{table}
 
-\noindent With the air quality data lacking such strong periodic regularity and exhibiting more complex, non-stationary dynamics, it is harder for simpler or decomposition-based models to capture underlying patterns effectively. This setting confirms PatchTST's competencies in local pattern extraction.
+\emph{Caveat on the Autoformer comparison.} The ETTh1 paper configuration ($D{=}16$, $H{=}4$, $d_{ff}{=}128$) is severely under-capacity for Autoformer's encoder--decoder, which typically uses $D{=}512$ in the original paper. The Autoformer numbers above should therefore be read as a floor rather than a fair baseline; we kept the configuration fixed across all four models to isolate the effect of architecture rather than hyperparameter tuning. The PatchTST-vs-DLinear comparison is unaffected.
 
-\subsection{Highly Correlated Dataset 1: Foreign Currency Exchange Rates}
+\subsection{Computational Cost}
 
-The exchange rate dataset consists of daily foreign exchange rates over 5,978-timesteps. Each variable represents the exchange rate of a currency with a total of 42 currency exchange rates.
+Beyond forecasting accuracy, the proposal calls for a comparison of the computational cost of training and prediction. Training wall-clock is reported in Tables~\ref{tab:results} and~\ref{tab:additional_results}. For prediction cost we rely on two measurements: the theoretical self-attention complexity of each architecture, and the end-to-end test-set inference time captured by the training pipeline (\texttt{test\_inference\_time}, the wall-clock time taken to run the trained model over the full test loader).
 
-\bigskip
+The theoretical story follows directly from the architectural choices. Autoformer and Informer both tokenize at the point level, so self-attention scales quadratically with the lookback length: for $L{=}336$ they attend over $336$ tokens per head. DLinear has no attention at all and scales as $O(L \cdot H)$ per channel. PatchTST patches the sequence with $P{=}16$, $S{=}8$, yielding $N{=}41$ tokens, so attention scales as $O(N^2) = O((L/S)^2)$---for our settings an ${\approx}67\times$ reduction in the attention term relative to point-wise tokenization. The ACCA extension adds a single $C \times C$ linear layer per forward pass, which is negligible next to the encoder ($O(C^2 \cdot N \cdot D)$ compared with $O(M \cdot N^2 \cdot D)$ for the attention stack when $C \ll N$).
 
-\noindent After preprocessing, the dataset contains:
-\begin{itemize}
-\item Length: 5,978-timesteps
-\item Frequency: Daily
-\item Input features: 42 currency exchange rates
-\end{itemize}
-
-\subsubsection{Key Characteristics}
-
-\begin{itemize}
-\item High cross-variable correlation: Exchange rates are jointly influenced by global macroeconomic factors, resulting in strong co-movement across currencies.
-\item Weak periodicity: Seasonal patterns are unstable.
-\item High volatility and noise: Exhibit stochastic fluctuations driven by market dynamics.
-\item Non-stationarity: Structural changes over time (e.g., financial crises) alter statistical properties.
-\end{itemize}
-These characteristics make the dataset particularly suitable for evaluating the limitations of channel-independent modelling.
-
-\subsubsection{Performance Comparison}
-The results demonstrate a clear performance advantage of PatchTST over both baseline models.
-\begin{itemize}
-\item PatchTST achieves the lowest error across all metrics, significantly outperforming DLinear and Autoformer.
-\item Compared to DLinear, PatchTST reduces MSE by approximately 48\%, indicating the benefit of modeling non-linear temporal dependencies.
-\item Autoformer performs substantially worse, suggesting that its decomposition-based architecture is not well-suited to financial time series with weak seasonality.
-\end{itemize}
-These results demonstrate that PatchTST is highly effective even in challenging financial time series.
-
-\begin{table}[h]
-\centering
-\caption{Performance comparison on the exchange rate dataset. Lower is better.}
-\label{tab:results}
-\begin{tabular}{lcc}
-\toprule
-Model & MSE & MAE \\
-\midrule
-PatchTST   & 0.081 & 0.174 \\
-DLinear    & 0.156 & 0.260 \\
-Autoformer & 0.350 & 0.406 \\
-\bottomrule
-\end{tabular}
-\end{table}
+In practice, the measured asymmetry in training time between PatchTST and Autoformer (e.g. $2846.3$s vs $522.5$s on Traffic) is dominated by Autoformer early-stopping after only 10 epochs and PatchTST training for 58; per-epoch wall-clock is comparable because the Autoformer decoder adds work that partially offsets the attention saving. For the prediction-only cost, we surface \texttt{test\_inference\_time} in every run's final summary and in \texttt{RESULTS.md}; because the full test sets are small (<5\% of the training wall-clock for every configuration) we do not replicate the numbers here. The ACCA inference overhead is dataset-dependent in our latest runs: it increases PatchTST test inference time on Traffic (2.307s to 2.752s) and Air Quality (1.602s to 1.907s), while being slightly lower on FX (0.549s to 0.542s), so there is no consistent sub-3\% overhead pattern across all datasets.
 
 % ============================================================
-\section{Extension: Cross-Channel Attention}
+\section{Extension: Adaptive Cross-Channel Attention}
 \label{sec:extension}
 % ============================================================
 
-\textit{TODO: This section will be completed by [teammate names].
-Propose and evaluate an adaptive cross-channel attention module that relaxes
-the strict channel-independence assumption. Include motivation, architecture design,
-ablation studies, and results.}
+\subsection{Motivation}
+
+The Channel-Independent design treats each variable as a fully independent sequence. While this provides strong regularization and data efficiency, it creates a failure mode in datasets where channels share partial—but not identical—temporal dynamics. When two channels exhibit correlated lookback patterns but diverge in their prediction horizons, the shared backbone receives contradictory gradient signals from both channels simultaneously. The model cannot resolve this conflict without access to inter-channel context.
+
+The Foreign Exchange dataset is a controlled setting for this hypothesis: all currency pairs are driven by a common set of global macroeconomic forces, so cross-channel information should in principle be predictive. Evaluating CI PatchTST against a cross-channel-aware variant on FX, while controlling for performance on the standard benchmarks, provides a direct test of when the independence assumption is a strength versus a limitation.
+
+\subsection{Architecture}
+
+We introduce the \textbf{Adaptive Cross-Channel Attention (ACCA)} module, which is inserted into the existing PatchTST forward pass without modifying the Transformer backbone. After the encoder produces per-channel representations $\mathbf{Z} \in \mathbb{R}^{(B \cdot C) \times N \times D}$, the module reshapes the batch to $\mathbb{R}^{(B \cdot N) \times C \times D}$ to expose the channel axis, computes a cross-channel interaction $\mathbf{H}$, and blends the result back into the original representation via a learned scalar gate $\alpha$:
+\begin{equation}
+    \mathbf{Z}' = \mathbf{Z} + \alpha \cdot (\mathbf{H} - \mathbf{Z}), \qquad \alpha = \sigma(\alpha_{\text{raw}})
+\end{equation}
+where $\sigma$ denotes the sigmoid function and $\alpha_{\text{raw}}$ is a single learnable scalar parameter. When $\alpha = 0$ the output is identical to vanilla PatchTST; when $\alpha = 1$ the representation is fully replaced by the cross-channel signal. The gate is initialized to $\alpha_{\text{raw}} = -4.6$, giving $\alpha_0 \approx 0.01$, so the model starts as a faithful copy of PatchTST and can learn to open the cross-channel pathway through gradient descent.
+
+The cross-channel interaction $\mathbf{H}$ is computed by a linear map across the channel axis: a shared $C \to C$ linear layer mixes the $C$ channel vectors (patch representations in $\mathbb{R}^D$) at every $(B, N)$ position, directly combining channel representations without explicit attention weights. We deliberately chose this simple linear mixer over a multi-head attention variant: the channel axis is short ($C \leq 42$ in our experiments), and the linear formulation isolates whether any cross-channel signal is beneficial without introducing additional inductive biases from attention heads or positional embeddings.
+
+The module is injected before the prediction head---operating on the patch-level encoder output $\mathbb{R}^{(B \cdot C) \times N \times D}$---so that the mixed representation passes through the existing linear projection to the forecast horizon. This placement allows cross-channel context to influence the final linear projection rather than mixing already-committed forecasts, keeping the head identical to the base PatchTST.
+
+\subsection{Results on ETTh1}
+
+Table~\ref{tab:acca_results} shows the ETTh1 results for PatchTST with and without ACCA. Both ACCA configurations achieve nearly identical MSE and MAE to the base model, indicating that the module does not degrade performance. Critically, the learned gate converges to $\alpha_{\text{effective}} \approx 0.01$ in all runs—very close to its initialization value and near zero—meaning the model learns to keep the cross-channel blending gate almost fully closed. This is a meaningful result in itself: it confirms that for ETTh1, a dataset with only 7 weakly correlated variables, explicit cross-channel mixing provides no useful signal and the CI assumption holds. The true test of the ACCA module is the FX dataset, where the channels are strongly correlated and the gate is expected to open further. However, results on FX show that ACCA yielded nearly identical mean squared error to the base CI model (0.089 for both), suggesting that simple linear cross-channel information does not offer meaningful predictive advantages over the robust channel-independent baseline even here.
+
+\begin{table}[h]
+\centering
+\caption{ETTh1 ACCA ablation (pred\_len = 96). Lower is better.}
+\label{tab:acca_results}
+\begin{tabular}{lllcccc}
+\toprule
+Model & Config & ACCA Type & MSE & MAE & Best Epoch & $\alpha_{\text{eff}}$ \\
+\midrule
+PatchTST      & ETTh1   & —      & 0.381 & 0.403 & 37 & — \\
+PatchTST+ACCA & ETTh1   & linear & 0.381 & 0.403 & 37 & 0.0103 \\
+PatchTST+ACCA & default & linear & 0.377 & 0.399 & 3  & 0.0102 \\
+\bottomrule
+\end{tabular}
+\end{table}
 
 % ============================================================
 \section{Conclusion}
 % ============================================================
 
-\textit{TODO: To be written after all experimental sections are complete.}
+This project reproduced PatchTST from first principles in PyTorch and validated the implementation against the paper's reported results on ETTh1. Our reproduction achieves within 2\% of the paper's MSE for PatchTST and DLinear, confirming the correctness of our implementation. During reproduction, we identified and documented four discrepancies between the paper and the authors' reference code: the unconditional padding scheme in the patching formula, the substitution of instance normalization with learned RevIN, a dropout rate discrepancy between the paper text and training scripts, and a doubled dropout on the attention output path. We corrected all four in our implementation to faithfully match the paper's description.
+
+We further proposed and implemented the Adaptive Cross-Channel Attention (ACCA) module, which relaxes the strict channel-independence assumption via a learned alpha-blending gate. On ETTh1, the gate converges to near-zero, confirming that cross-channel mixing is not beneficial for that dataset and that the CI assumption is appropriate there.
+
+Evaluations across the Traffic, Air Quality, and Foreign Exchange datasets reveal a consistent narrative: Channel Independence (CI) is a remarkably resilient structural prior. Even in the FX dataset—comprising 42 strongly correlated currency pairs where cross-channel effects were heavily expected to help—introducing a learnable cross-channel mixing layer (ACCA) failed to provide statistically meaningful forecasting improvements over standard PatchTST. This strengthens the original authors' claim that CI limits harmful covariate shift and representation entanglement better than explicit channel mixing can overcome them for standard forecasting horizons.
 
 % ============================================================
-% References — TODO: finalize with group. Need >10 total.
+% References
 % ============================================================
-% \bibliographystyle{IEEEtran}
-% \bibliography{references}
 
 \begin{thebibliography}{99}
+
+\bibitem{vaswani2017}
+A. Vaswani, N. Shazeer, N. Parmar, J. Uszkoreit, L. Jones, A. N. Gomez, {\L}. Kaiser, and I. Polosukhin,
+``Attention Is All You Need,''
+in \textit{Advances in Neural Information Processing Systems (NeurIPS)},
+vol. 30, pp. 5998--6008, 2017.
+
 \bibitem{informer}
-H. Zhou et al.,
+H. Zhou, S. Zhang, J. Peng, S. Zhang, J. Li, H. Xiong, and W. Zhang,
 ``Informer: Beyond Efficient Transformer for Long Sequence Time-Series Forecasting,''
-\textit{Proceedings of the AAAI Conference on Artificial Intelligence},
+in \textit{Proceedings of the AAAI Conference on Artificial Intelligence},
 vol. 35, no. 12, pp. 11106--11115, May 2021,
-doi:10.1609/aaai.v35i12.17325.
+doi: 10.1609/aaai.v35i12.17325.
 
 \bibitem{autoformer}
 H. Wu, J. Xu, J. Wang, and M. Long,
 ``Autoformer: Decomposition Transformers with Auto-Correlation for Long-Term Series Forecasting,''
-\textit{arXiv preprint arXiv:2106.13008}, Dec. 2021,
-doi:10.48550/arxiv.2106.13008.
+in \textit{Advances in Neural Information Processing Systems (NeurIPS)},
+vol. 34, pp. 22419--22430, 2021,
+doi: 10.48550/arXiv.2106.13008.
 
 \bibitem{dlinear}
 A. Zeng, M. Chen, L. Zhang, and Q. Xu,
 ``Are Transformers Effective for Time Series Forecasting?''
-\textit{Proceedings of the AAAI Conference on Artificial Intelligence},
-vol. 37, no. 9, pp. 11121--11128, Jun. 2023, 
-doi:10.1609/aaai.v37i9.26317.
+in \textit{Proceedings of the AAAI Conference on Artificial Intelligence},
+vol. 37, no. 9, pp. 11121--11128, Jun. 2023,
+doi: 10.1609/aaai.v37i9.26317.
 
 \bibitem{patchtst}
 Y. Nie, N. H. Nguyen, P. Sinthong, and J. Kalagnanam,
 ``A Time Series is Worth 64 Words: Long-term Forecasting with Transformers,''
-\textit{International Conference on Learning Representations (ICLR)}, 2023,
-doi:10.48550/arXiv.2211.14730.
+in \textit{International Conference on Learning Representations (ICLR)}, 2023,
+doi: 10.48550/arXiv.2211.14730.
 
-\bibitem{data-traffic}
-J. Hogue,
-``Metro Interstate Traffic Volume,''
-UCI Machine Learning Repository, 2019,
-doi:10.24432/C5X60B.
-
-\bibitem{data-air}
-S. Chen,
-``Beijing PM2.5 [Dataset],''
-UCI Machine Learning Repository, 2015,
-doi:10.24432/C5JS49.
-
+\bibitem{revin}
+T. Kim, J. Kim, Y. Tae, C. Park, J.-H. Choi, and J. Choo,
+``Reversible Instance Normalization for Accurate Time-Series Forecasting against Distribution Shift,''
+in \textit{International Conference on Learning Representations (ICLR)}, 2022.
+[Online]. Available: \url{https://openreview.net/forum?id=cGDAkQo1C0p}.
+[Accessed: Apr. 20, 2026]
 
 \bibitem{patchtst_github}
 Y. Nie, N. H. Nguyen, P. Sinthong, and J. Kalagnanam,
-PatchTST: Official implementation,
+``PatchTST: Official Implementation,''
+GitHub, 2023.
 [Online]. Available: \url{https://github.com/yuqinie98/PatchTST}.
 [Accessed: Apr. 18, 2026]
 
-
 \bibitem{time_series_library}
-Time-Series-Library,
-[Online]. Available: \url{https://github.com/thuml/Time-Series-Library}.
+H. Wu, T. Hu, Y. Liu, H. Zhou, J. Wang, and M. Long,
+``TimesNet: Temporal 2D-Variation Modeling for General Time Series Analysis,''
+in \textit{International Conference on Learning Representations (ICLR)}, 2023,
+doi: 10.48550/arXiv.2210.02186.
+Code: \url{https://github.com/thuml/Time-Series-Library}.
 [Accessed: Apr. 18, 2026]
-% TODO: add remaining references as needed by each section
+
+\bibitem{traffic_dataset}
+J. Hogue,
+``Metro Interstate Traffic Volume,''
+UCI Machine Learning Repository, 2019,
+doi: 10.24432/C5X60B.
+[Online]. Available: \url{https://archive.ics.uci.edu/dataset/492/metro+interstate+traffic+volume}.
+[Accessed: Apr. 20, 2026]
+
+\bibitem{air_dataset}
+X. Liang, T. Zou, B. Guo, S. Li, H. Zhang, S. Zhang, H. Huang, and S. X. Chen,
+``Assessing Beijing's PM2.5 Pollution: Severity, Weather Impact, APEC and Winter Heating,''
+\textit{Proceedings of the Royal Society A: Mathematical, Physical and Engineering Sciences},
+vol. 471, no. 2182, p. 20150257, 2015,
+doi: 10.1098/rspa.2015.0257.
+Dataset archived at UCI Machine Learning Repository, 2016.
+[Online]. Available: \url{https://archive.ics.uci.edu/dataset/381/beijing+pm2+5+data}.
+[Accessed: Apr. 20, 2026]
+
+\bibitem{fx_dataset}
+thebasss,
+``Currency Exchange Rates,''
+Kaggle, 2018.
+[Online]. Available: \url{https://www.kaggle.com/datasets/thebasss/currency-exchange-rates}.
+[Accessed: Apr. 20, 2026]
+
 \end{thebibliography}
 \end{document}

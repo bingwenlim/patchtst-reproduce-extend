@@ -131,46 +131,29 @@ class PatchEmbedding(nn.Module):
 
 
 class AdaptiveCrossChannelAttention(nn.Module):
-    def __init__(self, c_in, d_model_or_len, n_heads=4, dropout=0.1, alpha_mode='learned', acca_type='attention', acca_placement='pre_head', alpha_init=-4.6):
+    """Adaptive Cross-Channel Attention (linear, pre-head) with a learned
+    sigmoid gate on the cross-channel residual.
+
+    Applied to the encoder output [B*C, P, D] before the prediction head.
+    Reshapes the batch to [B*P, C, D], mixes channels with a linear map across
+    the channel axis, then blends the result back into the original
+    representation via a learnable scalar gate alpha = sigmoid(alpha_raw).
+    """
+
+    def __init__(self, c_in, d_model, alpha_init=-4.6):
         super().__init__()
         self.c_in = c_in
-        self.d_model = d_model_or_len
-        self.acca_type = acca_type
-        self.acca_placement = acca_placement
-        self.alpha_mode = alpha_mode
-        self._first_forward = True
+        self.d_model = d_model
 
-        if alpha_mode == 'learned':
-            self._alpha_raw = nn.Parameter(torch.tensor([float(alpha_init)], dtype=torch.float32).view(1, 1, 1))
-        elif alpha_mode == 'fixed_zero':
-            self.register_buffer('_alpha_raw', torch.tensor([-float('inf')], dtype=torch.float32).view(1, 1, 1))
-        elif alpha_mode == 'fixed_one':
-            self.register_buffer('_alpha_raw', torch.tensor([float('inf')], dtype=torch.float32).view(1, 1, 1))
-        else:
-            raise ValueError(f"Unknown alpha_mode: {alpha_mode}")
+        # Learnable scalar gate on the cross-channel residual. Initialized so
+        # that alpha_0 = sigmoid(-4.6) ~= 0.01, i.e. the module starts as a
+        # near-identity on the encoder output.
+        self._alpha_raw = nn.Parameter(
+            torch.tensor([float(alpha_init)], dtype=torch.float32).view(1, 1, 1)
+        )
 
-        self.channel_embeddings = nn.Parameter(torch.randn(1, c_in, 1))
-
-        if acca_type == 'attention':
-            self.n_heads = min(n_heads, max(1, c_in // 2))
-            
-            # Ensure d_model is divisible by n_heads
-            self.internal_dim = self.d_model
-            if self.d_model % self.n_heads != 0:
-                self.internal_dim = self.n_heads * (self.d_model // self.n_heads + 1)
-                self.in_proj = nn.Linear(self.d_model, self.internal_dim)
-                self.out_proj = nn.Linear(self.internal_dim, self.d_model)
-            else:
-                self.in_proj = nn.Identity()
-                self.out_proj = nn.Identity()
-            
-            self.mha = nn.MultiheadAttention(embed_dim=self.internal_dim, num_heads=self.n_heads, dropout=dropout, batch_first=True)
-            self.norm = nn.LayerNorm(self.internal_dim)
-            self.dropout = nn.Dropout(dropout)
-        elif acca_type == 'linear':
-            self.linear = nn.Linear(c_in, c_in)
-        else:
-            raise ValueError(f"Unknown acca_type: {acca_type}")
+        # Linear mixing across the channel axis.
+        self.linear = nn.Linear(c_in, c_in)
 
     @property
     def alpha_raw(self):
@@ -181,45 +164,23 @@ class AdaptiveCrossChannelAttention(nn.Module):
         return torch.sigmoid(self._alpha_raw).flatten()[0].item()
 
     def forward(self, x, b, c):
+        # x: [B*C, P, D]
         alpha = torch.sigmoid(self._alpha_raw)
-        
-        if self.acca_placement == 'pre_head':
-            # x is [B*C, P, D] where P is num_patches
-            bc, p, d = x.shape
-            
-            x_reshaped = x.reshape(b, c, p, d)
-            # attention across channels: [B*P, C, D]
-            x_transposed = x_reshaped.permute(0, 2, 1, 3).reshape(b * p, c, d)
-            
-            if self.acca_type == 'attention':
-                x_transposed_with_emb = x_transposed + self.channel_embeddings
-                x_proj = self.in_proj(x_transposed_with_emb)
-                attn_out, _ = self.mha(x_proj, x_proj, x_proj)
-                h = self.out_proj(self.norm(x_proj + self.dropout(attn_out)))
-            else: # linear
-                h = self.linear(x_transposed.transpose(1, 2)).transpose(1, 2)
-                
-            out_transposed = x_transposed + alpha * (h - x_transposed)
-            # Back to [B*C, P, D]
-            out = out_transposed.reshape(b, p, c, d).permute(0, 2, 1, 3).reshape(bc, p, d)
-            return out
-            
-        elif self.acca_placement == 'post_head':
-            # x is [B*C, pred_len]
-            bc, l = x.shape
-            
-            x_t = x.reshape(b, c, l)
-            
-            if self.acca_type == 'attention':
-                x_t_with_emb = x_t + self.channel_embeddings
-                x_proj = self.in_proj(x_t_with_emb)
-                attn_out, _ = self.mha(x_proj, x_proj, x_proj)
-                h = self.out_proj(self.norm(x_proj + self.dropout(attn_out)))
-            else:
-                h = self.linear(x_t.transpose(1, 2)).transpose(1, 2)
-                
-            out = x_t + alpha * (h - x_t)
-            return out.reshape(bc, l)
+        bc, p, d = x.shape
+
+        # [B, C, P, D] -> [B*P, C, D] to mix across the channel axis.
+        x_reshaped = x.reshape(b, c, p, d)
+        x_transposed = x_reshaped.permute(0, 2, 1, 3).reshape(b * p, c, d)
+
+        # Linear map across channels.
+        h = self.linear(x_transposed.transpose(1, 2)).transpose(1, 2)
+
+        # Residual blend gated by alpha.
+        out_transposed = x_transposed + alpha * (h - x_transposed)
+
+        # Back to [B*C, P, D].
+        out = out_transposed.reshape(b, p, c, d).permute(0, 2, 1, 3).reshape(bc, p, d)
+        return out
 
 
 class PredictionHead(nn.Module):
@@ -282,20 +243,12 @@ class Model(nn.Module):
         )
 
         self.use_acca = getattr(configs, 'use_acca', False)
-        self.acca_placement = getattr(configs, 'acca_placement', 'pre_head')
         if self.use_acca:
-            with torch.random.fork_rng():
-                d_acca = self.d_model if self.acca_placement == 'pre_head' else self.pred_len
-                self.acca = AdaptiveCrossChannelAttention(
-                    c_in=self.enc_in,
-                    d_model_or_len=d_acca,
-                    n_heads=getattr(configs, 'acca_n_heads', self.n_heads),
-                    dropout=self.dropout,
-                    alpha_mode=getattr(configs, 'alpha_mode', 'learned'),
-                    alpha_init=getattr(configs, 'alpha_init', -4.6),
-                    acca_type=getattr(configs, 'acca_type', 'attention'),
-                    acca_placement=self.acca_placement
-                )
+            self.acca = AdaptiveCrossChannelAttention(
+                c_in=self.enc_in,
+                d_model=self.d_model,
+                alpha_init=getattr(configs, 'alpha_init', -4.6),
+            )
 
     def forecast(self, x_enc):
         """
@@ -318,14 +271,12 @@ class Model(nn.Module):
         # Transformer encoder
         x = self.encoder(x)  # [B*C, num_patches, d_model]
 
-        if self.use_acca and self.acca_placement == 'pre_head':
+        # Optional cross-channel mixing before the prediction head.
+        if self.use_acca:
             x = self.acca(x, B, C)
 
         # Prediction head
         x = self.head(x)  # [B*C, pred_len]
-
-        if self.use_acca and self.acca_placement == 'post_head':
-            x = self.acca(x, B, C)
 
         # [B*C, pred_len] -> [B, pred_len, C]
         x = x.reshape(B, C, self.pred_len).permute(0, 2, 1)

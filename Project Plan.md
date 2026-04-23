@@ -1,3 +1,8 @@
+**Executive Status Summary: Completed**
+> *Note: This document is the original project proposal. All proposed tasks, including dataset sourcing, PatchTST replication, ACCA architectural innovation, and benchmarking against DLinear and Autoformer, have been fully executed. For the final results, please see `RESULTS.md` and the final report in `report/patchtst.tex`.*
+
+---
+
 **DSA5106 Project Proposal**
 
 **Publication:** Nie, Y., Nguyen, N. H., Sinthong, P., & Kalagnanam, J. (2023). [*A Time Series is Worth 64 Words: Long-term Forecasting with Transformers.*](https://arxiv.org/abs/2211.14730) *International Conference on Learning Representations (ICLR)*. 
@@ -17,7 +22,7 @@ The chosen paper, PatchTST, addresses these limitations through two key innovati
 
 **Core Research Question**
 
-We aim to investigate:
+The objective is to investigate:
 
 How does patch-based tokenization improve long-term forecasting efficiency and generalization, and can relaxing the strict channel-independence assumption further enhance performance on highly correlated multivariate datasets?
 
@@ -35,33 +40,33 @@ To thoroughly understand the technical content and reproduce PatchTST, we will r
 
 **3.1 Reproduction Plan**
 
-We will reproduce PatchTST from scratch in PyTorch. This involves implementing the patching mechanism, the Transformer encoder backbone, and the prediction head without relying on the authors' original training scripts. We will then run it on 2 standard benchmark datasets that were not featured in the paper (e.g. weather, electricity), and compare it against baseline models (DLinear and Autoformer) to confirm the relative performance reported in the original paper. 
+This project replicates PatchTST from scratch in PyTorch. This involves implementing the patching mechanism, the Transformer encoder backbone, and the prediction head without relying on the authors' original training scripts. The architecture is evaluated on 2 standard benchmark datasets that were not featured in the paper (e.g. weather, electricity), and compare it against baseline models (DLinear and Autoformer) to confirm the relative performance reported in the original paper. 
 
 **3.2 Dataset Extension**
 
-The original PatchTST model relies heavily on a Channel-Independent (CI) architecture, meaning each variable in a multivariate time series is processed independently.  To test the limits of this CI assumption, we will extend to evaluate PatchTST on a dataset with strong inter-variable dependencies to test whether the channel-independence assumption limits performance in correlated settings.   Similarly, we will be comparing its performance against the 2 baseline models as well.
+The original PatchTST model relies heavily on a Channel-Independent (CI) architecture, meaning each variable in a multivariate time series is processed independently.  To test the limits of this CI assumption, the study extends to evaluate PatchTST on a dataset with strong inter-variable dependencies to test whether the channel-independence assumption limits performance in correlated settings.   Similarly, comparisons are drawn its performance against the 2 baseline models as well.
 
 **3.3 Architectural Extension** 
 
 We will extend the paper by addressing a key limitation: the strict channel-independence assumption. While channel independence is less susceptible to overfitting, it fails to capture explicit cross-variable dependencies (e.g., the relationship between temperature and humidity in weather forecasting). 
 
-We propose an **Adaptive Cross-Channel Attention Module**. After the independent patches are processed by the primary Transformer encoder, the learned representations will be fed into this new module to learn variable dependencies before the final prediction head.
+The study proposes an **Adaptive Cross-Channel Attention Module**. After the independent patches are processed by the primary Transformer encoder, the learned representations will be fed into this new module to learn variable dependencies before the final prediction head.
 
 **4\. Evaluation of Result**
 
-To evaluate the success of our reproduction and the effectiveness of our extensions, we will employ the following methodology:
+To evaluate the success of the replication and the effectiveness of the proposed extensions, we will employ the following methodology:
 
-We will evaluate our reproduction and extensions using standard time-series forecasting metrics: **Mean Squared Error (MSE)** and **Mean Absolute Error (MAE)**.  We will also do comparisons on the **Computation Cost** of training and prediction. 
+Evaluation is conducted the replication and extensions using standard time-series forecasting metrics: **Mean Squared Error (MSE)** and **Mean Absolute Error (MAE)**.  Additional analysis includes the **Computation Cost** of training and prediction. 
 
-Our evaluation pipeline will conduct a direct comparative analysis across the three configurations:
+The evaluation pipeline conducts a direct comparative analysis across the three configurations:
 
 1. Open-source baselines (DLinear, Autoformer)  
 2. Our reproduced base PatchTST (Channel-Independent)  
 3. Our Extended PatchTST (with Cross-Channel Attention)
 
-We will run these models across our chosen datasets (two standard benchmarks and one highly correlated dataset). 
+These models are tested across our chosen datasets (two standard benchmarks and one highly correlated dataset). 
 
-By comparing the Extended PatchTST against the base model specifically on the highly correlated dataset, we will be able to objectively evaluate our hypothesis: whether explicitly modeling cross-channel dependencies at a later stage in the network improves forecasting accuracy in strongly correlated environments.  We will also be able to evaluate how these additional layers affect the performance on standard datasets.
+By comparing the extended PatchTST against the base model specifically on the highly correlated dataset, the hypothesis is objectively evaluated: whether explicitly modeling cross-channel dependencies at a later stage in the network improves forecasting accuracy in strongly correlated environments.  This approach also evaluates how these additional layers affect the performance on standard datasets.
 
 **5\. Planned Division of Work**
 
